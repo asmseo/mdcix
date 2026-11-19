@@ -1,0 +1,13 @@
+services:
+  mdcix:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - mdcix-certs:/certs
+    command: ["serve", "--listen", ":8080", "--cert-dir", "/certs", "--mode", "reader"]
+
+volumes:
+  mdcix-certs:

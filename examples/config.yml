@@ -1,0 +1,20 @@
+# Exemplo de configuração mdcix
+# Uso: mdcix serve --config examples/config.yml
+
+listen: ":8080"
+
+# reader = só o artigo (máxima economia de tokens)
+# agent  = artigo + links úteis (navegação para agentes)
+mode: reader
+
+# Contagem estilo OpenAI cl100k
+encoding: cl100k_base
+
+# MITM HTTPS: converte páginas https:// (cliente precisa confiar na CA local)
+mitm: true
+cert_dir: ./certs
+
+# Não use insecure em produção
+insecure: false
+
+user_agent: "mdcix/0.1 (+https://github.com/asmseo/mdcix)"
