@@ -1,0 +1,26 @@
+# Binaries
+/mdcix
+/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test / coverage
+*.test
+*.out
+coverage.html
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local runtime
+/certs/
+/cache/
+/out/
+*.pem
+.env
+config.local.yml
