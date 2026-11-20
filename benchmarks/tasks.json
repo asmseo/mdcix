@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "notes": "Deterministic local tasks. Answer scoring with LLMs is optional and env-gated.",
+  "tasks": [
+    {
+      "id": "en-pricing",
+      "fixture": "en-docs-structured.html",
+      "query": "What are the Starter and Pro prices?",
+      "budget": 400,
+      "expect_facts": ["$29", "$99"],
+      "strategy": ["read_budget", "outline_sections"]
+    },
+    {
+      "id": "pt-planos",
+      "fixture": "pt-saas-produto.html",
+      "query": "Qual o preço do plano Básico e do Escala?",
+      "budget": 350,
+      "expect_facts": ["R$ 149", "R$ 399"],
+      "strategy": ["read_budget"]
+    },
+    {
+      "id": "es-limites",
+      "fixture": "es-noticia.html",
+      "query": "limitaciones BM25 idiomas",
+      "budget": 300,
+      "expect_facts": ["léxico", "idiomas"],
+      "strategy": ["read_budget"]
+    },
+    {
+      "id": "unstructured-hours",
+      "fixture": "unstructured-smallbiz.html",
+      "query": "hours parking contact",
+      "budget": 200,
+      "expect_facts": ["Mon-Sat", "Elm"],
+      "strategy": ["read_budget", "read_page"]
+    },
+    {
+      "id": "bot-negative",
+      "fixture": "bot-challenge.html",
+      "query": "",
+      "budget": 100,
+      "expect_failure": "bot_challenge",
+      "strategy": ["read_page"]
+    }
+  ]
+}

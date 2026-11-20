@@ -4,7 +4,7 @@ Primary validation for budget-aware retrieval.
 
 ## Goals
 
-Compare task-level token use and answer accuracy across:
+Compare task-level token use (and later answer accuracy) across:
 
 1. Raw HTML  
 2. Full Markdown (mdcix)  
@@ -14,20 +14,28 @@ Compare task-level token use and answer accuracy across:
 
 ## Local harness (no external network)
 
-Fixtures under `fixtures/` cover EN/PT/ES, structured docs, unstructured small-business pages, and a bot-challenge negative case.
-
 ```bash
 go test ./benchmarks/ -v -count=1
 ```
 
-The harness reports `html_tokens`, `md_tokens`, `budget_tokens`, approximate outline size, and reduction vs full Markdown.
+- Fixtures: `fixtures/` (EN/PT/ES, unstructured, bot-challenge)
+- Tasks: `tasks.json` with `expect_facts` / `expect_failure`
+- Reports: html/md/returned tokens, latency, reduction vs Markdown, fact presence
 
 **Rules**
 
 - Extraction failures / CAPTCHA / bot walls are **not** counted as token savings.
 - Token counts are `cl100k_base` estimates — not provider billing.
-- External model answer-accuracy runs remain optional and env-gated.
+- Do not optimize fixtures to artificially favor mdcix.
 
-## Status
+## Optional external baselines
 
-Local token-reduction harness is runnable. Live-web and LLM answer scoring land later; do not optimize fixtures to artificially favor mdcix.
+```bash
+export MDCIX_BENCH_JINA_URL=...      # optional
+export MDCIX_BENCH_FIRECRAWL_KEY=... # optional
+# runners for these envs are reserved; local harness does not require them
+```
+
+## LLM answer scoring
+
+Out of band: same model/prompt across strategies. Not required for the local token harness.

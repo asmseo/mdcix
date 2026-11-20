@@ -20,29 +20,46 @@ func TestDBPath(t *testing.T) {
 	}
 }
 
-func TestPutGetClear(t *testing.T) {
+func TestPutGetClearMetaEvict(t *testing.T) {
 	dir := t.TempDir()
 	store, err := Open(DBPath(dir), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	store.MaxEntries = 2
 
-	doc := document.Document{URL: "https://ex.test", Version: "abc", Markdown: "# Hi"}
+	doc := document.Document{URL: "https://ex.test/a", Version: "abc", Markdown: "# Hi"}
 	key := Key(doc.URL, "reader", "cl100k_base")
-	if err := store.Put(key, doc); err != nil {
+	if err := store.PutWithMeta(key, doc, EntryMeta{ETag: `"v1"`, LastModified: "Wed, 01 Jan 2020 00:00:00 GMT"}); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := store.Get(key)
+	got, meta, ok, err := store.GetWithMeta(key)
 	if err != nil || !ok {
 		t.Fatalf("get ok=%v err=%v", ok, err)
 	}
-	if got.Version != "abc" {
-		t.Fatalf("%+v", got)
+	if got.Version != "abc" || meta.ETag != `"v1"` {
+		t.Fatalf("%+v meta=%+v", got, meta)
 	}
-	n, err := store.Stats()
-	if err != nil || n != 1 {
-		t.Fatalf("stats n=%d err=%v", n, err)
+
+	// no-store must not persist
+	if err := store.PutWithMeta(Key("https://ex.test/nostore", "reader", "cl100k_base"), doc, EntryMeta{CacheControl: "no-store"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := store.Get(Key("https://ex.test/nostore", "reader", "cl100k_base")); ok {
+		t.Fatal("no-store should not cache")
+	}
+
+	_ = store.Put(Key("https://ex.test/b", "reader", "cl100k_base"), document.Document{URL: "b", Version: "b"})
+	_ = store.Put(Key("https://ex.test/c", "reader", "cl100k_base"), document.Document{URL: "c", Version: "c"})
+	n, _ := store.Stats()
+	if n > 2 {
+		t.Fatalf("evict failed n=%d", n)
+	}
+
+	st, err := store.StatsDetail()
+	if err != nil || st.SchemaVersion == "" {
+		t.Fatalf("%+v err=%v", st, err)
 	}
 	if err := store.Clear(); err != nil {
 		t.Fatal(err)

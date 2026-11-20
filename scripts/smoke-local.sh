@@ -64,10 +64,11 @@ sleep 0.4
 URL="http://127.0.0.1:${FIX_PORT}/en-docs-structured.html"
 curl -sf "$URL" | grep -q "Acme Cloud" && ok "fixture $URL" || bad "fixture server"
 
+# Persistent flags before the subcommand (cobra-safe).
 COMMON=(--allow-private --cache-dir "$CACHE_DIR" --mitm=false)
 
 step 3 "CLI fetch"
-if "$BIN" fetch "${COMMON[@]}" "$URL" 2>/tmp/mdcix-fetch.err | grep -q "Pricing\|Overview\|Acme"; then
+if "$BIN" "${COMMON[@]}" fetch "$URL" 2>/tmp/mdcix-fetch.err | grep -q "Pricing\|Overview\|Acme"; then
   ok "fetch markdown"
 else
   bad "fetch"; cat /tmp/mdcix-fetch.err >&2 || true
@@ -75,7 +76,7 @@ fi
 grep -q "mdcix token comparison\|Tokens\|original\|markdown" /tmp/mdcix-fetch.err 2>/dev/null && ok "fetch token stats stderr" || ok "fetch ran (stats optional format)"
 
 step 4 "CLI outline"
-OUT="$("$BIN" outline "${COMMON[@]}" "$URL")"
+OUT="$("$BIN" "${COMMON[@]}" outline "$URL")"
 echo "$OUT" | grep -q '"sections"' && ok "outline json" || bad "outline json"
 echo "$OUT" | grep -qi 'pricing' && ok "outline has pricing" || bad "outline pricing"
 SID="$(echo "$OUT" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(next(s["id"] for s in d["sections"] if "pricing" in s["id"].lower() or "pricing" in s["title"].lower()))')"
@@ -83,17 +84,19 @@ VER="$(echo "$OUT" | python3 -c 'import sys,json; print(json.load(sys.stdin)["do
 echo "section_id=$SID version=$VER"
 
 step 5 "CLI read full / sections / budget"
-"$BIN" read "${COMMON[@]}" "$URL" 2>/dev/null | grep -qi Acme && ok "read full" || bad "read full"
-"$BIN" read "${COMMON[@]}" "$URL" --sections "$SID" --budget 800 --json 2>/dev/null | grep -q selected_sections && ok "read --sections" || bad "read --sections"
-"$BIN" read "${COMMON[@]}" "$URL" --query "pricing integrations" --budget 400 --json 2>/dev/null | grep -q returned_tokens && ok "read --query --budget" || bad "read --query"
+"$BIN" "${COMMON[@]}" read "$URL" 2>/dev/null | grep -qi Acme && ok "read full" || bad "read full"
+"$BIN" "${COMMON[@]}" read "$URL" --sections "$SID" --budget 800 --json 2>/dev/null | grep -q selected_sections && ok "read --sections" || bad "read --sections"
+"$BIN" "${COMMON[@]}" read "$URL" --query "pricing integrations" --budget 400 --json 2>/dev/null | grep -q returned_tokens && ok "read --query --budget" || bad "read --query"
 
 step 6 "cache stats"
-"$BIN" cache stats --cache-dir "$CACHE_DIR" | grep -q entries= && ok "cache stats" || bad "cache stats"
-ENTRIES="$("$BIN" cache stats --cache-dir "$CACHE_DIR" | sed -n 's/.*entries=\([0-9]*\).*/\1/p')"
-[[ "${ENTRIES:-0}" -ge 1 ]] && ok "cache populated ($ENTRIES)" || bad "cache empty"
+STAT_LINE="$("$BIN" --cache-dir "$CACHE_DIR" cache stats)"
+echo "$STAT_LINE"
+echo "$STAT_LINE" | grep -q entries= && ok "cache stats" || bad "cache stats"
+ENTRIES="$(echo "$STAT_LINE" | sed -n 's/.* entries=\([0-9][0-9]*\).*/\1/p')"
+[[ "${ENTRIES:-0}" -ge 1 ]] && ok "cache populated ($ENTRIES)" || bad "cache empty (line=$STAT_LINE)"
 
 step 7 "REST API :$API_PORT"
-"$BIN" serve --api --listen "127.0.0.1:$API_PORT" "${COMMON[@]}" >/tmp/mdcix-api.log 2>&1 &
+"$BIN" "${COMMON[@]}" serve --api --listen "127.0.0.1:$API_PORT" >/tmp/mdcix-api.log 2>&1 &
 API_PID=$!
 HEALTH_OK=0
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
@@ -120,14 +123,14 @@ curl -sf -X POST "http://127.0.0.1:$API_PORT/v1/read-budget" -H 'content-type: a
   -d "{\"url\":\"$URL\",\"query\":\"pricing plans\",\"budget\":400}" | grep -q returned_tokens && ok "POST /v1/read-budget" || bad "POST /v1/read-budget"
 
 step 8 "SSRF guard (must fail without --allow-private)"
-if "$BIN" outline --mitm=false "http://127.0.0.1:$FIX_PORT/en-docs-structured.html" >/tmp/mdcix-ssrf.out 2>/tmp/mdcix-ssrf.err; then
+if "$BIN" --mitm=false outline "http://127.0.0.1:$FIX_PORT/en-docs-structured.html" >/tmp/mdcix-ssrf.out 2>/tmp/mdcix-ssrf.err; then
   bad "SSRF should block loopback"
 else
   ok "SSRF blocks loopback"
 fi
 
 step 9 "bot challenge not treated as savings"
-if "$BIN" outline "${COMMON[@]}" "http://127.0.0.1:$FIX_PORT/bot-challenge.html" >/tmp/mdcix-bot.out 2>/tmp/mdcix-bot.err; then
+if "$BIN" "${COMMON[@]}" outline "http://127.0.0.1:$FIX_PORT/bot-challenge.html" >/tmp/mdcix-bot.out 2>/tmp/mdcix-bot.err; then
   bad "bot challenge should error"
 else
   grep -qi 'bot_challenge\|challenge\|interstitial' /tmp/mdcix-bot.err /tmp/mdcix-bot.out 2>/dev/null && ok "bot challenge rejected" || ok "bot challenge errored"
@@ -138,12 +141,12 @@ MCP_OUT="$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  | "$BIN" mcp "${COMMON[@]}" 2>/tmp/mdcix-mcp.err || true)"
+  | "$BIN" "${COMMON[@]}" mcp 2>/tmp/mdcix-mcp.err || true)"
 echo "$MCP_OUT" | grep -q '"protocolVersion"' && ok "mcp initialize" || bad "mcp initialize"
 echo "$MCP_OUT" | grep -q 'page_outline' && echo "$MCP_OUT" | grep -q 'read_budget' && ok "mcp tools/list" || bad "mcp tools/list"
 
 step 11 "proxy HTML convert + JSON pass-through :$PROXY_PORT"
-"$BIN" serve --listen "127.0.0.1:$PROXY_PORT" --mitm=false --mode reader >/tmp/mdcix-proxy.log 2>&1 &
+"$BIN" --mitm=false --mode reader serve --listen "127.0.0.1:$PROXY_PORT" >/tmp/mdcix-proxy.log 2>&1 &
 PROXY_PID=$!
 sleep 0.5
 PROXY_HTML="$(curl -sf -x "http://127.0.0.1:$PROXY_PORT" -D /tmp/mdcix-proxy-h.hdr "$URL" || true)"
@@ -167,8 +170,8 @@ kill "$JSON_PID" 2>/dev/null || true
 echo "$JSON_BODY" | grep -q '"ok":true' && ok "proxy JSON pass-through" || bad "proxy JSON pass-through"
 
 step 12 "cache clear"
-"$BIN" cache clear --cache-dir "$CACHE_DIR" >/dev/null
-"$BIN" cache stats --cache-dir "$CACHE_DIR" | grep -q 'entries=0' && ok "cache clear" || bad "cache clear"
+"$BIN" --cache-dir "$CACHE_DIR" cache clear >/dev/null
+"$BIN" --cache-dir "$CACHE_DIR" cache stats | grep -q 'entries=0' && ok "cache clear" || bad "cache clear"
 
 echo
 echo "=============================="

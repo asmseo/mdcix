@@ -26,4 +26,9 @@ user_agent: "mdcix/0.2 (+https://github.com/asmseo/mdcix)"
 # Local testing only — relaxes SSRF for loopback/private URLs.
 # allow_private: false
 
+# max_cache_entries: 1000
+# telemetry: false
+# policy_enabled: true
+# skip_robots: false
+
 

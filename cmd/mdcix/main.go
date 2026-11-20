@@ -20,9 +20,11 @@ import (
 	"github.com/asmseo/mdcix/internal/fetch"
 	"github.com/asmseo/mdcix/internal/gateway"
 	"github.com/asmseo/mdcix/internal/mitm"
+	"github.com/asmseo/mdcix/internal/policy"
 	"github.com/asmseo/mdcix/internal/pro"
 	"github.com/asmseo/mdcix/internal/proxy"
 	"github.com/asmseo/mdcix/internal/stats"
+	"github.com/asmseo/mdcix/internal/telemetry"
 	"github.com/asmseo/mdcix/internal/tokens"
 	httpapi "github.com/asmseo/mdcix/internal/transport/http"
 	"github.com/asmseo/mdcix/internal/transport/mcp"
@@ -98,15 +100,25 @@ func newEngine(cfg *config.Config) (*gateway.Engine, error) {
 		MaxBody:      cfg.MaxBody,
 		Encoding:     cfg.Encoding,
 		AllowPrivate: cfg.AllowPrivate,
+		Telemetry:    telemetry.FromConfig(telemetry.Config{Enabled: cfg.Telemetry}),
+		Policy: &policy.Checker{
+			UserAgent:  cfg.UserAgent,
+			Enabled:    cfg.PolicyEnabled,
+			SkipRobots: cfg.SkipRobots || cfg.AllowPrivate, // skip robots when probing loopback fixtures
+		},
 	}
 	if cfg.AllowPrivate {
 		log.Printf("warning: --allow-private enabled (SSRF guard relaxed for loopback/private nets)")
+	}
+	if cfg.Telemetry {
+		log.Printf("warning: telemetry enabled (still local-only; no remote export in this release)")
 	}
 	if cfg.CacheDir != "" {
 		store, err := cache.Open(cache.DBPath(cfg.CacheDir), cfg.CacheTTL)
 		if err != nil {
 			return nil, fmt.Errorf("cache: %w", err)
 		}
+		store.MaxEntries = cfg.MaxCacheEntries
 		eng.Cache = store
 	}
 	return eng, nil
@@ -132,11 +144,12 @@ func cacheCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 				return err
 			}
 			defer store.Close()
-			n, err := store.Stats()
+			st, err := store.StatsDetail()
 			if err != nil {
 				return err
 			}
-			fmt.Printf("cache_path=%s entries=%d\n", cache.DBPath(cfg.CacheDir), n)
+			fmt.Printf("cache_path=%s entries=%d bytes=%d schema=%s ttl_s=%d max_entries=%d\n",
+				cache.DBPath(cfg.CacheDir), st.Entries, st.ApproxBytes, st.SchemaVersion, st.TTLSeconds, st.MaxEntries)
 			return nil
 		},
 	})

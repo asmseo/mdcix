@@ -45,7 +45,7 @@ http://127.0.0.1:18082/en-docs-structured.html
 ## 2. CLI — fetch (compatibilidade)
 
 ```bash
-./mdcix fetch --allow-private --mitm=false \
+./mdcix --allow-private --mitm=false fetch \
   http://127.0.0.1:18082/en-docs-structured.html
 ```
 
@@ -59,7 +59,7 @@ OK:
 ## 3. CLI — outline
 
 ```bash
-./mdcix outline --allow-private --mitm=false --cache-dir ./data \
+./mdcix --allow-private --mitm=false --cache-dir ./data outline \
   http://127.0.0.1:18082/en-docs-structured.html
 ```
 
@@ -73,16 +73,16 @@ Anote um `id` (ex.: seção de pricing) e o `document_version`.
 
 ```bash
 # página completa
-./mdcix read --allow-private --mitm=false --cache-dir ./data \
+./mdcix --allow-private --mitm=false --cache-dir ./data read \
   http://127.0.0.1:18082/en-docs-structured.html
 
 # seções escolhidas pelo agente
-./mdcix read --allow-private --mitm=false --cache-dir ./data \
+./mdcix --allow-private --mitm=false --cache-dir ./data read \
   http://127.0.0.1:18082/en-docs-structured.html \
   --sections pricing --budget 800 --json
 
 # budget lexical (BM25)
-./mdcix read --allow-private --mitm=false --cache-dir ./data \
+./mdcix --allow-private --mitm=false --cache-dir ./data read \
   http://127.0.0.1:18082/en-docs-structured.html \
   --query "pricing integrations" --budget 400 --json
 ```
@@ -98,12 +98,12 @@ OK:
 ## 5. Cache SQLite
 
 ```bash
-./mdcix cache stats --cache-dir ./data
-./mdcix outline --allow-private --mitm=false --cache-dir ./data \
+./mdcix --cache-dir ./data cache stats
+./mdcix --allow-private --mitm=false --cache-dir ./data outline \
   http://127.0.0.1:18082/en-docs-structured.html >/dev/null
-./mdcix cache stats --cache-dir ./data
-./mdcix cache clear --cache-dir ./data
-./mdcix cache stats --cache-dir ./data
+./mdcix --cache-dir ./data cache stats
+./mdcix --cache-dir ./data cache clear
+./mdcix --cache-dir ./data cache stats
 ```
 
 OK: `entries` sobe após outline/read; volta a `0` após clear.
@@ -113,8 +113,8 @@ OK: `entries` sobe após outline/read; volta a `0` após clear.
 ## 6. REST API
 
 ```bash
-./mdcix serve --api --listen 127.0.0.1:18080 \
-  --allow-private --mitm=false --cache-dir ./data
+./mdcix --allow-private --mitm=false --cache-dir ./data \
+  serve --api --listen 127.0.0.1:18080
 ```
 
 Em outro terminal:
@@ -147,7 +147,7 @@ OK: `/health` → `{"status":"ok"}`; demais endpoints devolvem JSON/Markdown coe
 
 ```bash
 # SEM --allow-private → deve falhar
-./mdcix outline --mitm=false \
+./mdcix --mitm=false outline \
   http://127.0.0.1:18082/en-docs-structured.html
 ```
 
@@ -158,7 +158,7 @@ OK: erro bloqueando loopback/privado.
 ## 8. Bot challenge ≠ savings
 
 ```bash
-./mdcix outline --allow-private --mitm=false \
+./mdcix --allow-private --mitm=false outline \
   http://127.0.0.1:18082/bot-challenge.html
 ```
 

@@ -168,7 +168,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, err
 		if len(args.SectionIDs) == 0 {
 			return toolErr("section_ids required"), nil
 		}
-		res, err := s.Eng.ReadSections(ctx, args.URL, args.SectionIDs, args.Budget)
+		res, err := s.Eng.ReadSectionsVersioned(ctx, args.URL, args.SectionIDs, args.Budget, args.DocumentVersion)
 		if err != nil {
 			return toolErr(err.Error()), nil
 		}

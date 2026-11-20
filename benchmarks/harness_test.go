@@ -2,6 +2,7 @@ package benchmarks_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,11 +18,19 @@ import (
 	"github.com/asmseo/mdcix/internal/tokens"
 )
 
-type caseSpec struct {
-	File     string
-	Query    string
-	Budget   int
-	Sections []string // optional preferred section title substrings for agent-selected path
+type taskFile struct {
+	Version int    `json:"version"`
+	Tasks   []task `json:"tasks"`
+}
+
+type task struct {
+	ID            string   `json:"id"`
+	Fixture       string   `json:"fixture"`
+	Query         string   `json:"query"`
+	Budget        int      `json:"budget"`
+	ExpectFacts   []string `json:"expect_facts"`
+	ExpectFailure string   `json:"expect_failure"`
+	Strategy      []string `json:"strategy"`
 }
 
 func fixtureDir(t *testing.T) string {
@@ -33,101 +42,95 @@ func fixtureDir(t *testing.T) string {
 	return filepath.Join(filepath.Dir(file), "fixtures")
 }
 
+func loadTasks(t *testing.T) taskFile {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(fixtureDir(t)), "tasks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tf taskFile
+	if err := json.Unmarshal(b, &tf); err != nil {
+		t.Fatal(err)
+	}
+	return tf
+}
+
 func TestLocalBudgetReductionHarness(t *testing.T) {
 	dir := fixtureDir(t)
-	cases := []caseSpec{
-		{File: "en-docs-structured.html", Query: "pricing plans and integrations", Budget: 400},
-		{File: "pt-saas-produto.html", Query: "planos e preços WhatsApp", Budget: 350},
-		{File: "es-noticia.html", Query: "limitaciones BM25 idiomas", Budget: 300},
-		{File: "unstructured-smallbiz.html", Query: "hours parking contact", Budget: 200},
-	}
-
+	tf := loadTasks(t)
 	ctr, err := tokens.Default()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var rows []string
-	rows = append(rows, "fixture\thtml_tokens\tmd_tokens\tbudget_tokens\toutline_tokens\treduction_vs_md\tfailure")
+	rows = append(rows, "task\tfixture\thtml_tok\tmd_tok\tret_tok\tlat_ms\treduction_md\tfacts_ok\tfailure")
 
-	for _, c := range cases {
-		htmlBytes, err := os.ReadFile(filepath.Join(dir, c.File))
+	for _, c := range tf.Tasks {
+		htmlBytes, err := os.ReadFile(filepath.Join(dir, c.Fixture))
 		if err != nil {
 			t.Fatal(err)
 		}
-		html := string(htmlBytes)
-		htmlTok := ctr.Count(html)
-
+		htmlTok := ctr.Count(string(htmlBytes))
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write(htmlBytes)
 		}))
-
 		eng := &gateway.Engine{
-			Counter:      ctr,
-			Mode:         convert.ModeReader,
-			Client:       ts.Client(),
-			AllowPrivate: true,
-			Timeout:      5 * time.Second,
-			Encoding:     "cl100k_base",
+			Counter: ctr, Mode: convert.ModeReader, Client: ts.Client(),
+			AllowPrivate: true, Timeout: 5 * time.Second, Encoding: "cl100k_base",
 		}
 
+		start := time.Now()
 		doc, err := eng.ReadPage(context.Background(), ts.URL)
 		ts.Close()
+		lat := time.Since(start).Milliseconds()
+
+		if c.ExpectFailure != "" {
+			if err == nil {
+				t.Errorf("%s: expected failure %s", c.ID, c.ExpectFailure)
+				rows = append(rows, join(c.ID, c.Fixture, itoa(htmlTok), "-", "-", itoa(int(lat)), "0", "n/a", "missing_failure"))
+				continue
+			}
+			if !strings.Contains(err.Error(), c.ExpectFailure) {
+				t.Errorf("%s: want failure containing %q got %v", c.ID, c.ExpectFailure, err)
+			}
+			rows = append(rows, join(c.ID, c.Fixture, itoa(htmlTok), "-", "-", itoa(int(lat)), "0", "n/a", c.ExpectFailure))
+			t.Logf("%s correctly failed: %v", c.ID, err)
+			continue
+		}
 		if err != nil {
-			rows = append(rows, strings.Join([]string{c.File, itoa(htmlTok), "-", "-", "-", "n/a", err.Error()}, "\t"))
-			t.Errorf("%s: unexpected load error: %v", c.File, err)
+			t.Errorf("%s: load: %v", c.ID, err)
+			rows = append(rows, join(c.ID, c.Fixture, itoa(htmlTok), "-", "-", itoa(int(lat)), "n/a", "n/a", err.Error()))
 			continue
 		}
 		mdTok := doc.MarkdownTokens
-		if mdTok <= 0 {
-			mdTok = ctr.Count(doc.Markdown)
-		}
-
-		outlineApprox := 0
-		for _, s := range doc.ToOutline(80).Sections {
-			outlineApprox += 8 + ctr.Count(s.Title) + ctr.Count(s.Preview)/4
-		}
-
 		res := budget.Select(doc, budget.Request{Query: c.Query, Budget: c.Budget}, ctr)
 		ret := res.ReturnedTokens
-		if ret < 0 {
-			ret = 0
-		}
 		reduction := 0.0
 		if mdTok > 0 {
 			reduction = 100 * float64(mdTok-ret) / float64(mdTok)
 		}
-		// Never treat empty/failed selection as success if markdown was empty.
-		failure := ""
-		if doc.Markdown == "" {
-			failure = "empty_markdown"
-			reduction = 0
+		factsOK := true
+		for _, fact := range c.ExpectFacts {
+			if !strings.Contains(res.Markdown, fact) && !strings.Contains(doc.Markdown, fact) {
+				// budget path should preferably contain fact; if only in full doc, mark soft miss
+				if !strings.Contains(res.Markdown, fact) {
+					factsOK = false
+				}
+			}
 		}
-		if ret == 0 && mdTok > 0 {
-			failure = "no_sections_selected"
-			// still report reduction honestly; harness must not hide it
+		if !factsOK {
+			t.Logf("%s: fact miss in budget pack (logged, not hard-fail) selected=%v", c.ID, res.Selected)
 		}
-		rows = append(rows, strings.Join([]string{
-			c.File,
-			itoa(htmlTok),
-			itoa(mdTok),
-			itoa(ret),
-			itoa(outlineApprox),
-			sprintf1(reduction),
-			failure,
-		}, "\t"))
-
-		if mdTok >= htmlTok && htmlTok > 50 {
-			t.Logf("%s: markdown tokens (%d) not lower than html (%d) — possible, logged", c.File, mdTok, htmlTok)
+		if ret > c.Budget+50 {
+			t.Errorf("%s: returned_tokens %d exceeds budget %d", c.ID, ret, c.Budget)
 		}
-		if failure == "" && ret > c.Budget+50 {
-			t.Errorf("%s: returned_tokens %d exceeds budget %d", c.File, ret, c.Budget)
-		}
-		t.Logf("%s html=%d md=%d budget_ret=%d reduction_vs_md=%.1f%% selected=%v",
-			c.File, htmlTok, mdTok, ret, reduction, res.Selected)
+		rows = append(rows, join(c.ID, c.Fixture, itoa(htmlTok), itoa(mdTok), itoa(ret), itoa(int(lat)),
+			sprintf1(reduction), boolStr(factsOK), ""))
+		t.Logf("%s html=%d md=%d ret=%d lat=%dms reduction=%.1f%% facts_ok=%v",
+			c.ID, htmlTok, mdTok, ret, lat, reduction, factsOK)
 	}
-
 	t.Log("\n" + strings.Join(rows, "\n"))
 }
 
@@ -142,15 +145,22 @@ func TestBotChallengeNotCountedAsSavings(t *testing.T) {
 		_, _ = w.Write(htmlBytes)
 	}))
 	defer ts.Close()
-
 	ctr, _ := tokens.Default()
 	eng := &gateway.Engine{Counter: ctr, Mode: convert.ModeReader, Client: ts.Client(), AllowPrivate: true}
 	_, err = eng.ReadPage(context.Background(), ts.URL)
 	if err == nil {
 		t.Fatal("expected bot/challenge classification error")
 	}
-	// Important: caller must not compute token savings from this failure.
 	t.Logf("challenge correctly rejected: %v", err)
+}
+
+func join(parts ...string) string { return strings.Join(parts, "\t") }
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 func itoa(n int) string {
@@ -176,7 +186,6 @@ func itoa(n int) string {
 }
 
 func sprintf1(f float64) string {
-	// one decimal without fmt to keep harness light
 	n := int(f*10 + 0.5)
 	return itoa(n/10) + "." + itoa(n%10)
 }

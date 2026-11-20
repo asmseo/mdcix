@@ -11,34 +11,41 @@ import (
 
 // Config is the runtime configuration for serve / fetch.
 type Config struct {
-	Listen    string        `yaml:"listen"`
-	Mode      string        `yaml:"mode"` // reader | agent
-	Encoding  string        `yaml:"encoding"`
-	MITM      bool          `yaml:"mitm"`
-	CertDir   string        `yaml:"cert_dir"`
-	Insecure  bool          `yaml:"insecure"`
-	Timeout   time.Duration `yaml:"timeout"`
-	MaxBody   int64         `yaml:"max_body"`
-	UserAgent string        `yaml:"user_agent"`
-	CacheDir     string        `yaml:"cache_dir"` // SQLite document cache directory; empty disables
-	CacheTTL     time.Duration `yaml:"cache_ttl"`
-	AllowPrivate bool          `yaml:"allow_private"` // permit loopback/private fetches (local testing only)
+	Listen           string        `yaml:"listen"`
+	Mode             string        `yaml:"mode"` // reader | agent
+	Encoding         string        `yaml:"encoding"`
+	MITM             bool          `yaml:"mitm"`
+	CertDir          string        `yaml:"cert_dir"`
+	Insecure         bool          `yaml:"insecure"`
+	Timeout          time.Duration `yaml:"timeout"`
+	MaxBody          int64         `yaml:"max_body"`
+	UserAgent        string        `yaml:"user_agent"`
+	CacheDir         string        `yaml:"cache_dir"`
+	CacheTTL         time.Duration `yaml:"cache_ttl"`
+	MaxCacheEntries  int           `yaml:"max_cache_entries"`
+	AllowPrivate     bool          `yaml:"allow_private"`
+	Telemetry        bool          `yaml:"telemetry"` // default false
+	SkipRobots       bool          `yaml:"skip_robots"`
+	PolicyEnabled    bool          `yaml:"policy_enabled"`
 }
 
 // Default returns sensible MVP defaults.
 func Default() Config {
 	return Config{
-		Listen:    ":8080",
-		Mode:      "reader",
-		Encoding:  "cl100k_base",
-		MITM:      true,
-		CertDir:   "./certs",
-		Insecure:  false,
-		Timeout:   30 * time.Second,
-		MaxBody:   8 << 20, // 8 MiB
-		UserAgent: "mdcix/0.2 (+https://github.com/asmseo/mdcix)",
-		CacheDir:  "",
-		CacheTTL:  24 * time.Hour,
+		Listen:          ":8080",
+		Mode:            "reader",
+		Encoding:        "cl100k_base",
+		MITM:            true,
+		CertDir:         "./certs",
+		Insecure:        false,
+		Timeout:         30 * time.Second,
+		MaxBody:         8 << 20, // 8 MiB
+		UserAgent:       "mdcix/0.2 (+https://github.com/asmseo/mdcix)",
+		CacheDir:        "",
+		CacheTTL:        24 * time.Hour,
+		MaxCacheEntries: 0,
+		Telemetry:       false,
+		PolicyEnabled:   true,
 	}
 }
 
@@ -82,8 +89,9 @@ func LoadYAML(path string, base Config) (Config, error) {
 	if overlay.CacheTTL > 0 {
 		base.CacheTTL = overlay.CacheTTL
 	}
-	// Bools: only override when key present is hard in yaml.v3 without custom types;
-	// accept explicit true/false from file by checking raw map for mitm/insecure.
+	if overlay.MaxCacheEntries > 0 {
+		base.MaxCacheEntries = overlay.MaxCacheEntries
+	}
 	var raw map[string]any
 	_ = yaml.Unmarshal(data, &raw)
 	if _, ok := raw["mitm"]; ok {
@@ -94,6 +102,15 @@ func LoadYAML(path string, base Config) (Config, error) {
 	}
 	if _, ok := raw["allow_private"]; ok {
 		base.AllowPrivate = overlay.AllowPrivate
+	}
+	if _, ok := raw["telemetry"]; ok {
+		base.Telemetry = overlay.Telemetry
+	}
+	if _, ok := raw["skip_robots"]; ok {
+		base.SkipRobots = overlay.SkipRobots
+	}
+	if _, ok := raw["policy_enabled"]; ok {
+		base.PolicyEnabled = overlay.PolicyEnabled
 	}
 	return base, nil
 }

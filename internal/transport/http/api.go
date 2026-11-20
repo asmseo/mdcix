@@ -98,7 +98,7 @@ func (s *Server) sections(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "url and section_ids required", http.StatusBadRequest)
 		return
 	}
-	res, err := s.eng.ReadSections(r.Context(), b.URL, b.SectionIDs, b.Budget)
+	res, err := s.eng.ReadSectionsVersioned(r.Context(), b.URL, b.SectionIDs, b.Budget, b.DocumentVersion)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

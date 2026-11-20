@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/asmseo/mdcix/internal/context/ranking"
+	"github.com/asmseo/mdcix/internal/context/tokenizer"
 	"github.com/asmseo/mdcix/internal/document"
 	"github.com/asmseo/mdcix/internal/tokens"
 )
@@ -28,6 +29,13 @@ type Response struct {
 	DocumentVersion string             `json:"document_version"`
 	URL             string             `json:"url"`
 	Scores          map[string]float64 `json:"scores,omitempty"`
+	// Metrics distinguish HTML→MD reduction from MD→selected-context reduction.
+	// Task-level agent savings belong to the benchmark harness, not this struct.
+	OriginalTokens          int     `json:"original_tokens,omitempty"`
+	MarkdownTokens          int     `json:"markdown_tokens,omitempty"`
+	ExtractionReductionPct  float64 `json:"extraction_reduction_pct,omitempty"`
+	SelectionReductionPct   float64 `json:"selection_reduction_pct,omitempty"`
+	TokenEstimateNote       string  `json:"token_estimate_note,omitempty"`
 }
 
 // Select packs BM25-ranked sections into budget without generative rewrite.
@@ -49,7 +57,11 @@ func Select(doc document.Document, req Request, ctr *tokens.Counter) Response {
 		Attribution:     doc.URL,
 		Warnings:        append([]string{}, doc.Warnings...),
 		Scores:          map[string]float64{},
+		OriginalTokens:  doc.OriginalTokens,
+		MarkdownTokens:  doc.MarkdownTokens,
+		TokenEstimateNote: tokenizer.Note,
 	}
+	resp.ExtractionReductionPct = pctReduction(doc.OriginalTokens, doc.MarkdownTokens)
 	if req.Query != "" && looksCrossLanguage(req.Query, doc) {
 		resp.Warnings = append(resp.Warnings, "possible_cross_language_query: BM25 is lexical; prefer agent-selected outline/sections")
 	}
@@ -125,6 +137,7 @@ func Select(doc document.Document, req Request, ctr *tokens.Counter) Response {
 	if len(resp.Selected) == 0 {
 		resp.Warnings = append(resp.Warnings, "no_sections_selected")
 	}
+	resp.SelectionReductionPct = pctReduction(doc.MarkdownTokens, resp.ReturnedTokens)
 	return resp
 }
 
@@ -138,11 +151,15 @@ func PackSections(doc document.Document, ids []string, budget int, ctr *tokens.C
 	}
 	secs, missing := doc.SectionsByIDs(ids)
 	resp := Response{
-		RequestedBudget: budget,
-		DocumentVersion: doc.Version,
-		URL:             doc.URL,
-		Attribution:     doc.URL,
-		Warnings:        append([]string{}, doc.Warnings...),
+		RequestedBudget:       budget,
+		DocumentVersion:       doc.Version,
+		URL:                   doc.URL,
+		Attribution:           doc.URL,
+		Warnings:              append([]string{}, doc.Warnings...),
+		OriginalTokens:        doc.OriginalTokens,
+		MarkdownTokens:        doc.MarkdownTokens,
+		TokenEstimateNote:     tokenizer.Note,
+		ExtractionReductionPct: pctReduction(doc.OriginalTokens, doc.MarkdownTokens),
 	}
 	for _, id := range missing {
 		resp.Warnings = append(resp.Warnings, "missing_section:"+id)
@@ -166,7 +183,19 @@ func PackSections(doc document.Document, ids []string, budget int, ctr *tokens.C
 	}
 	resp.Markdown = strings.Join(parts, "\n\n")
 	resp.ReturnedTokens = ctr.Count(resp.Markdown)
+	resp.SelectionReductionPct = pctReduction(doc.MarkdownTokens, resp.ReturnedTokens)
 	return resp
+}
+
+func pctReduction(from, to int) float64 {
+	if from <= 0 {
+		return 0
+	}
+	saved := from - to
+	if saved < 0 {
+		saved = 0
+	}
+	return float64(saved) / float64(from) * 100
 }
 
 func truncateToBudget(md string, budget int, ctr *tokens.Counter) string {

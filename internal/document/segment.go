@@ -193,10 +193,19 @@ func segmentUnstructured(lines []string, ctr *tokens.Counter) []Section {
 	for _, b := range blocks {
 		text := strings.Join(b, "\n")
 		t := ctr.Count(text)
-		// short bold/heading-like block as inferred heading opener
-		if isLikelyHeading(b) && len(chunk) > 0 {
-			emit(firstLineTitle(strings.Join(chunk, "\n")), chunk, true)
-			chunk, chunkTokens = nil, 0
+		// short bold / visually prominent line starts a new inferred section
+		if isLikelyHeading(b) {
+			if len(chunk) > 0 {
+				emit("", chunk, true)
+				chunk, chunkTokens = nil, 0
+			}
+			title := firstLineTitle(strings.Join(b, "\n"))
+			// keep heading line inside the next chunk so body attaches to it
+			chunk = append(chunk, b...)
+			chunk = append(chunk, "")
+			chunkTokens = t
+			_ = title
+			continue
 		}
 		if chunkTokens+t > softMax && len(chunk) > 0 {
 			emit("", chunk, true)

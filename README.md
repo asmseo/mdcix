@@ -36,12 +36,20 @@ mdcix cache clear --cache-dir ./data
 
 Cache SQLite (opcional): `--cache-dir ./data` no CLI/REST/MCP.
 
-## Testar ponto a ponto
+## Documentação
 
-Checklist manual: [`docs/TESTAR.md`](docs/TESTAR.md)
+| Doc | Conteúdo |
+|-----|----------|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | motor único, pacotes, métricas |
+| [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | o que este release **não** faz |
+| [`docs/INTEGRATION.md`](docs/INTEGRATION.md) | proxy / MCP / agentes |
+| [`docs/TESTAR.md`](docs/TESTAR.md) | checklist ponto a ponto (depois do DoD) |
+| [`deploy/README.md`](deploy/README.md) | Docker de um container |
+| [`benchmarks/README.md`](benchmarks/README.md) | harness local |
 
 ```bash
 ./scripts/smoke-local.sh    # fixtures locais, PASS/FAIL por passo
+go test ./benchmarks/ -v -count=1
 ```
 
 Para fixtures em `127.0.0.1`, use `--allow-private` (só em teste local).
@@ -192,11 +200,11 @@ Agente / curl / tool
      5) headers X-Mdcix-* + body text/markdown
 ```
 
-Pacotes: `cmd/mdcix`, `internal/{gateway,document,context,cache,security,transport/{http,mcp},proxy,mitm,certs,fetch,convert,tokens,stats,config,pro}`.
+Pacotes: `cmd/mdcix`, `internal/{gateway,document,context/{ranking,budget,tokenizer},cache,policy,security,telemetry,transport/{http,mcp},proxy,mitm,certs,fetch,convert,tokens,stats,config,pro}`.
 
 ## Open-core / Pro
 
-Core MIT funciona sozinho (proxy, CLI, REST, MCP stdio). `internal/pro` só tem interfaces/stubs (`Features`, `License`, `MCPBridge` overlay). Placeholders futuros: cache avançado, regras por domínio, dashboard, auth de equipe, Chrome — **sem billing** nesta fase.
+Core MIT funciona sozinho (proxy, CLI, REST, MCP stdio, cache, policy local). `internal/pro` só tem overlays opcionais. Fora de escopo agora: diretório público, crawler global, billing, vector DB, embeddings obrigatórios — ver [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
 
 ## Desenvolvimento
 
