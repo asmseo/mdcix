@@ -64,6 +64,7 @@ Universal integration: HTTP_PROXY/HTTPS_PROXY → mdcix serve, or CLI/REST/MCP t
 	root.PersistentFlags().BoolVar(&cfg.Insecure, "insecure", cfg.Insecure, "skip upstream TLS verify")
 	root.PersistentFlags().StringVar(&cfg.UserAgent, "user-agent", cfg.UserAgent, "User-Agent for upstream")
 	root.PersistentFlags().StringVar(&cfg.CacheDir, "cache-dir", cfg.CacheDir, "SQLite cache dir (or .db path); empty disables")
+	root.PersistentFlags().BoolVar(&cfg.AllowPrivate, "allow-private", cfg.AllowPrivate, "allow loopback/private URLs (local testing only; disables SSRF guard)")
 
 	root.AddCommand(serveCmd(&cfg, &cfgPath))
 	root.AddCommand(fetchCmd(&cfg, &cfgPath))
@@ -90,12 +91,16 @@ func newEngine(cfg *config.Config) (*gateway.Engine, error) {
 		return nil, err
 	}
 	eng := &gateway.Engine{
-		Counter:   ctr,
-		Mode:      convert.Mode(cfg.Mode),
-		UserAgent: cfg.UserAgent,
-		Timeout:   cfg.Timeout,
-		MaxBody:   cfg.MaxBody,
-		Encoding:  cfg.Encoding,
+		Counter:      ctr,
+		Mode:         convert.Mode(cfg.Mode),
+		UserAgent:    cfg.UserAgent,
+		Timeout:      cfg.Timeout,
+		MaxBody:      cfg.MaxBody,
+		Encoding:     cfg.Encoding,
+		AllowPrivate: cfg.AllowPrivate,
+	}
+	if cfg.AllowPrivate {
+		log.Printf("warning: --allow-private enabled (SSRF guard relaxed for loopback/private nets)")
 	}
 	if cfg.CacheDir != "" {
 		store, err := cache.Open(cache.DBPath(cfg.CacheDir), cfg.CacheTTL)

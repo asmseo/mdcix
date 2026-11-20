@@ -36,6 +36,16 @@ mdcix cache clear --cache-dir ./data
 
 Cache SQLite (opcional): `--cache-dir ./data` no CLI/REST/MCP.
 
+## Testar ponto a ponto
+
+Checklist manual: [`docs/TESTAR.md`](docs/TESTAR.md)
+
+```bash
+./scripts/smoke-local.sh    # fixtures locais, PASS/FAIL por passo
+```
+
+Para fixtures em `127.0.0.1`, use `--allow-private` (só em teste local).
+
 ## Integração universal = proxy
 
 ```bash

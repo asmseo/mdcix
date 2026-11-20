@@ -20,8 +20,9 @@ type Config struct {
 	Timeout   time.Duration `yaml:"timeout"`
 	MaxBody   int64         `yaml:"max_body"`
 	UserAgent string        `yaml:"user_agent"`
-	CacheDir  string        `yaml:"cache_dir"` // SQLite document cache directory; empty disables
-	CacheTTL  time.Duration `yaml:"cache_ttl"`
+	CacheDir     string        `yaml:"cache_dir"` // SQLite document cache directory; empty disables
+	CacheTTL     time.Duration `yaml:"cache_ttl"`
+	AllowPrivate bool          `yaml:"allow_private"` // permit loopback/private fetches (local testing only)
 }
 
 // Default returns sensible MVP defaults.
@@ -90,6 +91,9 @@ func LoadYAML(path string, base Config) (Config, error) {
 	}
 	if _, ok := raw["insecure"]; ok {
 		base.Insecure = overlay.Insecure
+	}
+	if _, ok := raw["allow_private"]; ok {
+		base.AllowPrivate = overlay.AllowPrivate
 	}
 	return base, nil
 }

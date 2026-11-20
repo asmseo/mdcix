@@ -1,6 +1,7 @@
 # Binaries
 /mdcix
 /bin/
+/bin/mdcix-smoke
 *.exe
 *.dll
 *.so
@@ -20,7 +21,9 @@ coverage.html
 # Local runtime
 /certs/
 /cache/
+/data/
 /out/
+/tmp-smoke/
 *.pem
 .env
 config.local.yml

@@ -23,3 +23,7 @@ user_agent: "mdcix/0.2 (+https://github.com/asmseo/mdcix)"
 # cache_dir: ./data
 # cache_ttl: 24h
 
+# Local testing only — relaxes SSRF for loopback/private URLs.
+# allow_private: false
+
+

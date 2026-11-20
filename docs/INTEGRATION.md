@@ -1,5 +1,7 @@
 # Integração mdcix com agentes de IA
 
+Checklist de validação manual / smoke: [`TESTAR.md`](TESTAR.md).
+
 O caminho **universal** é o proxy HTTP local. Qualquer runtime que respeite `HTTP_PROXY` / `HTTPS_PROXY` passa a receber Markdown limpo.
 
 ```bash
