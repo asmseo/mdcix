@@ -1,25 +1,23 @@
 package pro
 
-// MCPBridge is a placeholder for a future Model Context Protocol stdio server.
-//
-// The open MIT core intentionally does not ship a full MCP implementation in the
-// MVP — the universal integration path is the HTTP proxy (HTTP_PROXY/HTTPS_PROXY).
-// A Pro or phase-2 build may provide a real Bridge without changing the core API.
+// MCPBridge is retained for Pro builds that may wrap or extend the core MCP
+// stdio server (internal/transport/mcp). The open MIT core already ships a
+// functional MCP server via `mdcix mcp` — this interface is optional.
 type MCPBridge interface {
-	// Start would run an MCP stdio (or SSE) server that exposes fetch/convert tools.
+	// Start would run an alternate MCP transport (e.g. hosted SSE) supplied by Pro.
 	Start() error
 }
 
-// NoMCP is the default: MCP disabled.
+// NoMCP means no Pro MCP overlay (core stdio MCP still available via mdcix mcp).
 type NoMCP struct{}
 
-// Start returns an error explaining that proxy/fetch should be used instead.
+// Start returns an error explaining that the core CLI MCP command should be used.
 func (NoMCP) Start() error {
 	return ErrMCPNotImplemented
 }
 
-// ErrMCPNotImplemented is returned by the MVP stub.
-var ErrMCPNotImplemented = errMCP("mcp not implemented in core MVP; use HTTP_PROXY or mdcix fetch")
+// ErrMCPNotImplemented is returned when a Pro MCP overlay is requested but absent.
+var ErrMCPNotImplemented = errMCP("pro MCP overlay not installed; use `mdcix mcp` for the core stdio server")
 
 type errMCP string
 

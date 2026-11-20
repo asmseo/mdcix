@@ -24,6 +24,7 @@ import (
 	"github.com/asmseo/mdcix/internal/stats"
 	"github.com/asmseo/mdcix/internal/tokens"
 	httpapi "github.com/asmseo/mdcix/internal/transport/http"
+	"github.com/asmseo/mdcix/internal/transport/mcp"
 )
 
 // Set via -ldflags at release time.
@@ -67,7 +68,7 @@ Universal integration: HTTP_PROXY/HTTPS_PROXY → mdcix serve, or CLI/REST/MCP t
 	root.AddCommand(outlineCmd(&cfg, &cfgPath))
 	root.AddCommand(readCmd(&cfg, &cfgPath))
 	root.AddCommand(versionCmd())
-	root.AddCommand(mcpStubCmd())
+	root.AddCommand(mcpCmd(&cfg, &cfgPath))
 	return root
 }
 
@@ -320,16 +321,30 @@ func versionCmd() *cobra.Command {
 	}
 }
 
-func mcpStubCmd() *cobra.Command {
+func mcpCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
 		Short: "MCP stdio server (tools: page_outline, read_page, read_sections, read_budget)",
 		Long: `MCP tools share the same gateway engine as CLI/REST.
 
 Use outline when sections are unknown; multi-section when known; budget for targeted queries;
-full page for short docs. Prefer agent-selected mode for cross-language tasks.`,
+full page for short docs. Prefer agent-selected mode for cross-language tasks.
+
+Configure Cursor / Claude Desktop with:
+  {"command":"mdcix","args":["mcp"]}`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("mcp stdio: use 'mdcix serve --api' REST tools for now; full MCP transport landing next (engine ready)")
+			if err := loadCfg(*cfgPath, cfg); err != nil {
+				return err
+			}
+			eng, err := newEngine(cfg)
+			if err != nil {
+				return err
+			}
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			srv := mcp.New(eng, "mdcix", version)
+			log.Printf("mdcix MCP stdio ready (page_outline|read_page|read_sections|read_budget)")
+			return srv.Run(ctx)
 		},
 	}
 }

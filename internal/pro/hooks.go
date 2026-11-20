@@ -41,5 +41,5 @@ const (
 	FeatureDashboard       = "dashboard"
 	FeatureTeamAuth        = "team_auth"
 	FeatureChromeTransport = "chrome_transport"
-	FeatureMCP             = "mcp"
+	FeatureMCPOverlay      = "mcp_overlay" // optional Pro transport; core `mdcix mcp` is always available
 )

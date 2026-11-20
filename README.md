@@ -29,6 +29,7 @@ mdcix read https://example.com --sections pricing,integrations --budget 2000
 mdcix read https://example.com --query "pricing plans" --budget 1500
 mdcix serve                 # proxy HTTP_PROXY
 mdcix serve --api           # REST /v1/outline|/v1/read|/v1/sections|/v1/read-budget
+mdcix mcp                   # MCP stdio (page_outline|read_page|read_sections|read_budget)
 ```
 
 ## Integração universal = proxy
@@ -99,9 +100,30 @@ export HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080
 # …agent tools que fazem HTTP passam a ver Markdown
 ```
 
-## MCP (planejado)
+## MCP (stdio)
 
-Bridge MCP/stdio **não** faz parte do MVP core (comando `mdcix mcp` é stub). Até lá, use o **proxy** (universal) ou `mdcix fetch`. Hooks em `internal/pro` reservam espaço para MCP/Chrome/dashboard sem billing.
+O mesmo `gateway.Engine` do CLI/REST é exposto via Model Context Protocol:
+
+```bash
+mdcix mcp
+```
+
+Tools: `page_outline`, `read_page`, `read_sections`, `read_budget`. Conteúdo web volta delimitado como material não confiável.
+
+Exemplo Cursor / Claude Desktop (`mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "mdcix": {
+      "command": "mdcix",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Estratégia: outline quando seções são desconhecidas; multi-seção quando ids são conhecidos; budget para queries lexicais same-language; página completa só em docs curtos.
 
 ## Install
 
@@ -147,11 +169,11 @@ Agente / curl / tool
      5) headers X-Mdcix-* + body text/markdown
 ```
 
-Pacotes: `cmd/mdcix`, `internal/{proxy,mitm,certs,fetch,convert,tokens,stats,config,pro}`.
+Pacotes: `cmd/mdcix`, `internal/{gateway,document,context,cache,security,transport/{http,mcp},proxy,mitm,certs,fetch,convert,tokens,stats,config,pro}`.
 
 ## Open-core / Pro
 
-Core MIT funciona sozinho. `internal/pro` só tem interfaces/stubs (`Features`, `License`, `MCPBridge`). Placeholders futuros: cache avançado, regras por domínio, dashboard, auth de equipe, Chrome, MCP — **sem billing** nesta fase.
+Core MIT funciona sozinho (proxy, CLI, REST, MCP stdio). `internal/pro` só tem interfaces/stubs (`Features`, `License`, `MCPBridge` overlay). Placeholders futuros: cache avançado, regras por domínio, dashboard, auth de equipe, Chrome — **sem billing** nesta fase.
 
 ## Desenvolvimento
 
