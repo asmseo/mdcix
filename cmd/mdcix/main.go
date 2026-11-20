@@ -1,29 +1,34 @@
-// Command mdcix is the CLI entrypoint for the local markdown proxy.
+// Command mdcix is the CLI entrypoint for budget-aware web retrieval.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/asmseo/mdcix/internal/config"
+	"github.com/asmseo/mdcix/internal/context/budget"
 	"github.com/asmseo/mdcix/internal/convert"
 	"github.com/asmseo/mdcix/internal/fetch"
+	"github.com/asmseo/mdcix/internal/gateway"
 	"github.com/asmseo/mdcix/internal/mitm"
 	"github.com/asmseo/mdcix/internal/pro"
 	"github.com/asmseo/mdcix/internal/proxy"
 	"github.com/asmseo/mdcix/internal/stats"
 	"github.com/asmseo/mdcix/internal/tokens"
+	httpapi "github.com/asmseo/mdcix/internal/transport/http"
 )
 
 // Set via -ldflags at release time.
 var (
-	version = "0.1.0-dev"
+	version = "0.2.0-dev"
 	commit  = "none"
 )
 
@@ -39,17 +44,17 @@ func rootCmd() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:   "mdcix",
-		Short: "Local proxy that serves clean Markdown to AI agents (saves tokens)",
-		Long: `mdcix is an open-core local HTTP/HTTPS proxy that prefers Accept: text/markdown,
-converts HTML to clean Markdown when needed, and reports token savings.
+		Short: "Budget-aware web retrieval for AI agents (Markdown + sections + context)",
+		Long: `mdcix is open-core, local-first infrastructure for budget-aware web consumption.
 
-The universal integration path is the proxy itself: point HTTP_PROXY/HTTPS_PROXY
-at mdcix so Grok, Claude, ChatGPT, Gemini, Grok Bot, Cursor agents, and any tool
-that respects proxy env vars receive Markdown instead of noisy HTML.`,
+Markdown is the initial representation — the product is selective, measurable
+retrieval: full page, outline, multi-section, or query+budget packing.
+
+Universal integration: HTTP_PROXY/HTTPS_PROXY → mdcix serve, or CLI/REST/MCP tools.`,
 		SilenceUsage: true,
 	}
 	root.PersistentFlags().StringVar(&cfgPath, "config", "", "path to YAML config (optional)")
-	root.PersistentFlags().StringVar(&cfg.Listen, "listen", cfg.Listen, "proxy listen address")
+	root.PersistentFlags().StringVar(&cfg.Listen, "listen", cfg.Listen, "proxy/API listen address")
 	root.PersistentFlags().StringVar(&cfg.Mode, "mode", cfg.Mode, "conversion mode: reader|agent")
 	root.PersistentFlags().StringVar(&cfg.Encoding, "encoding", cfg.Encoding, "tiktoken encoding")
 	root.PersistentFlags().BoolVar(&cfg.MITM, "mitm", cfg.MITM, "enable HTTPS MITM (requires trusting local CA)")
@@ -59,6 +64,8 @@ that respects proxy env vars receive Markdown instead of noisy HTML.`,
 
 	root.AddCommand(serveCmd(&cfg, &cfgPath))
 	root.AddCommand(fetchCmd(&cfg, &cfgPath))
+	root.AddCommand(outlineCmd(&cfg, &cfgPath))
+	root.AddCommand(readCmd(&cfg, &cfgPath))
 	root.AddCommand(versionCmd())
 	root.AddCommand(mcpStubCmd())
 	return root
@@ -73,21 +80,40 @@ func loadCfg(path string, cfg *config.Config) error {
 	return nil
 }
 
+func newEngine(cfg *config.Config) (*gateway.Engine, error) {
+	ctr, err := tokens.New(cfg.Encoding)
+	if err != nil {
+		return nil, err
+	}
+	return &gateway.Engine{
+		Counter:   ctr,
+		Mode:      convert.Mode(cfg.Mode),
+		UserAgent: cfg.UserAgent,
+		Timeout:   cfg.Timeout,
+		MaxBody:   cfg.MaxBody,
+	}, nil
+}
+
 func serveCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
-	return &cobra.Command{
+	var api bool
+	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Run the local markdown proxy (default :8080)",
+		Short: "Run local proxy (and optional REST API) on :8080",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := loadCfg(*cfgPath, cfg); err != nil {
 				return err
 			}
-			_ = pro.Disabled{} // open-core hook present at runtime
+			_ = pro.Disabled{}
 
 			ctr, err := tokens.New(cfg.Encoding)
 			if err != nil {
 				return err
 			}
 			session := &stats.Session{}
+			eng, err := newEngine(cfg)
+			if err != nil {
+				return err
+			}
 
 			var mitmMgr *mitm.Manager
 			if cfg.MITM {
@@ -96,6 +122,18 @@ func serveCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 					return fmt.Errorf("mitm: %w", err)
 				}
 				log.Printf("MITM CA: %s (trust this cert for HTTPS conversion)", mitmMgr.CAPath())
+			}
+
+			if api {
+				srv := httpapi.New(eng, cfg.Listen)
+				ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				go func() {
+					<-ctx.Done()
+					_ = srv.Close()
+				}()
+				log.Printf("mdcix REST API on %s (/v1/outline|/v1/read|/v1/sections|/v1/read-budget|/health)", cfg.Listen)
+				return srv.ListenAndServe()
 			}
 
 			srv := proxy.New(proxy.Options{
@@ -123,13 +161,15 @@ func serveCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 			return srv.ListenAndServe()
 		},
 	}
+	cmd.Flags().BoolVar(&api, "api", false, "serve REST API instead of forward proxy")
+	return cmd
 }
 
 func fetchCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 	var showHeaders bool
 	cmd := &cobra.Command{
 		Use:   "fetch <url>",
-		Short: "One-shot fetch URL as Markdown (for agents/CLI tools)",
+		Short: "One-shot fetch URL as Markdown",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := loadCfg(*cfgPath, cfg); err != nil {
@@ -162,8 +202,112 @@ func fetchCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&showHeaders, "stats", true, "print token comparison (original vs markdown) to stderr")
+	cmd.Flags().BoolVar(&showHeaders, "stats", true, "print token comparison to stderr")
 	return cmd
+}
+
+func outlineCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "outline <url>",
+		Short: "Return compact page outline (section ids, titles, tokens)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := loadCfg(*cfgPath, cfg); err != nil {
+				return err
+			}
+			eng, err := newEngine(cfg)
+			if err != nil {
+				return err
+			}
+			out, err := eng.Outline(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
+		},
+	}
+}
+
+func readCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
+	var sections string
+	var query string
+	var tokBudget int
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "read <url>",
+		Short: "Read full page, selected sections, or budget-ranked content",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := loadCfg(*cfgPath, cfg); err != nil {
+				return err
+			}
+			eng, err := newEngine(cfg)
+			if err != nil {
+				return err
+			}
+			url := args[0]
+			switch {
+			case sections != "":
+				ids := splitCSV(sections)
+				res, err := eng.ReadSections(cmd.Context(), url, ids, tokBudget)
+				if err != nil {
+					return err
+				}
+				return printBudget(res, asJSON)
+			case query != "":
+				res, err := eng.ReadBudget(cmd.Context(), url, query, tokBudget)
+				if err != nil {
+					return err
+				}
+				return printBudget(res, asJSON)
+			default:
+				doc, err := eng.ReadPage(cmd.Context(), url)
+				if err != nil {
+					return err
+				}
+				if asJSON {
+					enc := json.NewEncoder(os.Stdout)
+					enc.SetIndent("", "  ")
+					return enc.Encode(doc)
+				}
+				fmt.Println(doc.Markdown)
+				fmt.Fprintf(os.Stderr, "document_version=%s sections=%d markdown_tokens=%d original_tokens=%d\n",
+					doc.Version, len(doc.Sections), doc.MarkdownTokens, doc.OriginalTokens)
+				return nil
+			}
+		},
+	}
+	cmd.Flags().StringVar(&sections, "sections", "", "comma-separated section ids")
+	cmd.Flags().StringVar(&query, "query", "", "budget-aware lexical query (BM25)")
+	cmd.Flags().IntVar(&tokBudget, "budget", 1500, "token budget for --sections/--query")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON instead of Markdown")
+	return cmd
+}
+
+func printBudget(res budget.Response, asJSON bool) error {
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(res)
+	}
+	fmt.Println(res.Markdown)
+	fmt.Fprintf(os.Stderr, "returned_tokens=%d budget=%d selected=%v truncated=%v warnings=%v\n",
+		res.ReturnedTokens, res.RequestedBudget, res.Selected, res.Truncated, res.Warnings)
+	return nil
+}
+
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func versionCmd() *cobra.Command {
@@ -179,20 +323,13 @@ func versionCmd() *cobra.Command {
 func mcpStubCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
-		Short: "MCP/stdio bridge (stub — planned; use HTTP_PROXY for now)",
-		Long: `MCP (Model Context Protocol) stdio bridge is planned for a later release.
+		Short: "MCP stdio server (tools: page_outline, read_page, read_sections, read_budget)",
+		Long: `MCP tools share the same gateway engine as CLI/REST.
 
-Until then, the universal integration path is the HTTP proxy:
-
-  mdcix serve
-  export HTTP_PROXY=http://127.0.0.1:8080
-  export HTTPS_PROXY=http://127.0.0.1:8080
-
-Or call: mdcix fetch <url>
-
-See README — section "MCP (planejado)".`,
+Use outline when sections are unknown; multi-section when known; budget for targeted queries;
+full page for short docs. Prefer agent-selected mode for cross-language tasks.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("mcp stdio bridge not implemented in MVP; use 'mdcix serve' + HTTP_PROXY/HTTPS_PROXY (universal) or 'mdcix fetch'")
+			return fmt.Errorf("mcp stdio: use 'mdcix serve --api' REST tools for now; full MCP transport landing next (engine ready)")
 		},
 	}
 }

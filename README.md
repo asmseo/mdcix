@@ -1,34 +1,42 @@
-# mdcix
+# mdcix — Context-Aware Web Infrastructure
 
-**Proxy local que economiza tokens para agentes de IA** — serve Markdown limpo no lugar de HTML ruidoso.
+Infraestrutura **local-first**, independente de modelo, para consumo **budget-aware** da web por agentes de IA.
 
-Licença do núcleo: **MIT** (open-core). Features Pro ficam em stubs/`internal/pro`; sem pagamento nesta fase.
+Markdown é o formato inicial de representação — **não** o produto. O produto é recuperação seletiva e mensurável: página completa, outline, seções ou packing por orçamento de tokens.
+
+Licença do núcleo: **MIT** (open-core). Sem billing, cloud obrigatória ou telemetria ligada por padrão.
+
+## Hipótese
+
+Recuperação seletiva e budget-aware pode reduzir tokens totais da tarefa **sem** degradar acurácia da resposta. O harness em `benchmarks/` existe para medir isso — não assumir vitória.
 
 ## Por que existe
 
-Agentes (Grok, Claude, ChatGPT, Gemini, Grok Bot, Cursor…) gastam tokens lendo HTML com nav, scripts e ads. O **mdcix** pede `Accept: text/markdown` primeiro, converte HTML com extração de conteúdo quando necessário, e **mostra a comparação de tokens** (original vs markdown, economia absoluta e %).
+Agentes gastam tokens em HTML ruidoso. O mdcix:
+
+1. Negocia `Accept: text/markdown` e extrai conteúdo principal.
+2. Segmenta em seções endereçáveis (versão de documento estável).
+3. Expõe outline / multi-seção / `read --query --budget` (BM25 lexical).
+4. Reporta tokens (original vs markdown vs retornado) — falhas/bot walls **não** contam como economia.
+
+## CLI
+
+```bash
+mdcix fetch https://example.com
+mdcix outline https://example.com
+mdcix read https://example.com
+mdcix read https://example.com --sections pricing,integrations --budget 2000
+mdcix read https://example.com --query "pricing plans" --budget 1500
+mdcix serve                 # proxy HTTP_PROXY
+mdcix serve --api           # REST /v1/outline|/v1/read|/v1/sections|/v1/read-budget
+```
 
 ## Integração universal = proxy
 
-O caminho principal de integração é o **proxy HTTP**. Qualquer cliente/tool que respeite `HTTP_PROXY` / `HTTPS_PROXY` passa a receber `text/markdown` com headers `X-Mdcix-*`.
-
 ```bash
-# 1) subir o proxy
-go run ./cmd/mdcix serve --listen :8080
-
-# 2) apontar o ambiente do agente / shell
-export HTTP_PROXY=http://127.0.0.1:8080
-export HTTPS_PROXY=http://127.0.0.1:8080
-
-# 3) qualquer fetch passa pelo mdcix
+mdcix serve --listen :8080
+export HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080
 curl -x http://127.0.0.1:8080 -D - https://example.com -o /tmp/out.md
-```
-
-One-shot (sem configurar proxy no processo do agente):
-
-```bash
-go run ./cmd/mdcix fetch https://example.com
-# stderr: comparação original vs markdown + % economizado
 ```
 
 ## Contagem de tokens (obrigatório no MVP)

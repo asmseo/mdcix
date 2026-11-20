@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asmseo/mdcix/internal/convert"
+	"github.com/asmseo/mdcix/internal/security"
 	"github.com/asmseo/mdcix/internal/tokens"
 )
 
@@ -92,6 +93,9 @@ func Get(ctx context.Context, rawURL string, opts Options) (*Result, error) {
 	ct := resp.Header.Get("Content-Type")
 	md, source, err := toMarkdown(string(body), ct, rawURL, opts.Mode)
 	if err != nil {
+		return nil, err
+	}
+	if err := security.ClassifyExtraction(resp.StatusCode, ct, string(body), md); err != nil {
 		return nil, err
 	}
 
