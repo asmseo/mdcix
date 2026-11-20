@@ -30,7 +30,11 @@ mdcix read https://example.com --query "pricing plans" --budget 1500
 mdcix serve                 # proxy HTTP_PROXY
 mdcix serve --api           # REST /v1/outline|/v1/read|/v1/sections|/v1/read-budget
 mdcix mcp                   # MCP stdio (page_outline|read_page|read_sections|read_budget)
+mdcix cache stats --cache-dir ./data
+mdcix cache clear --cache-dir ./data
 ```
+
+Cache SQLite (opcional): `--cache-dir ./data` no CLI/REST/MCP.
 
 ## Integração universal = proxy
 
@@ -134,11 +138,20 @@ go build -o mdcix ./cmd/mdcix
 ./mdcix serve
 ```
 
-Docker:
+Docker (um container, volume SQLite em `/data`):
 
 ```bash
 cd docker && docker compose up --build -d
-curl -x http://localhost:8080 -D - https://example.com | grep X-Mdcix
+curl -sS -X POST http://localhost:8080/health
+curl -sS -X POST http://localhost:8080/v1/outline -H 'content-type: application/json' \
+  -d '{"url":"https://example.com"}'
+# proxy mode: override command → serve --listen :8080 --cert-dir /certs
+```
+
+Benchmark local (sem rede externa):
+
+```bash
+go test ./benchmarks/ -v -count=1
 ```
 
 Config de exemplo: [`examples/config.yml`](examples/config.yml).

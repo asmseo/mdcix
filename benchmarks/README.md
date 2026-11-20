@@ -12,11 +12,22 @@ Compare task-level token use and answer accuracy across:
 4. Engine-selected `read_budget`  
 5. Optional external baselines (Jina/Firecrawl) via env  
 
-## Status
+## Local harness (no external network)
 
-Harness skeleton — fixtures and runners land next. Do **not** count extraction failures as savings.
+Fixtures under `fixtures/` cover EN/PT/ES, structured docs, unstructured small-business pages, and a bot-challenge negative case.
 
 ```bash
-# placeholder
-go test ./internal/...
+go test ./benchmarks/ -v -count=1
 ```
+
+The harness reports `html_tokens`, `md_tokens`, `budget_tokens`, approximate outline size, and reduction vs full Markdown.
+
+**Rules**
+
+- Extraction failures / CAPTCHA / bot walls are **not** counted as token savings.
+- Token counts are `cl100k_base` estimates — not provider billing.
+- External model answer-accuracy runs remain optional and env-gated.
+
+## Status
+
+Local token-reduction harness is runnable. Live-web and LLM answer scoring land later; do not optimize fixtures to artificially favor mdcix.

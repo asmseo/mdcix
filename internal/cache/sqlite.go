@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -20,10 +21,24 @@ type Store struct {
 	TTL time.Duration
 }
 
+// DBPath resolves a cache directory or explicit .db file path.
+func DBPath(cacheDirOrFile string) string {
+	if cacheDirOrFile == "" {
+		return ""
+	}
+	if strings.HasSuffix(strings.ToLower(cacheDirOrFile), ".db") {
+		return cacheDirOrFile
+	}
+	return filepath.Join(cacheDirOrFile, "mdcix.db")
+}
+
 // Open opens or creates the database at path.
 func Open(path string, ttl time.Duration) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil && filepath.Dir(path) != "." {
-		return nil, err
+	dir := filepath.Dir(path)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {

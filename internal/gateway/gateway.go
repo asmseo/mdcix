@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asmseo/mdcix/internal/cache"
 	"github.com/asmseo/mdcix/internal/context/budget"
 	"github.com/asmseo/mdcix/internal/convert"
 	"github.com/asmseo/mdcix/internal/document"
@@ -19,13 +20,15 @@ import (
 
 // Engine orchestrates fetch → extract → document → context selection.
 type Engine struct {
-	Counter   *tokens.Counter
-	Mode      convert.Mode
-	UserAgent string
-	Timeout   time.Duration
-	MaxBody   int64
-	Client    *http.Client
+	Counter      *tokens.Counter
+	Mode         convert.Mode
+	UserAgent    string
+	Timeout      time.Duration
+	MaxBody      int64
+	Client       *http.Client
 	AllowPrivate bool // only for explicit local config
+	Cache        *cache.Store
+	Encoding     string
 }
 
 // LoadOptions for retrieval.
@@ -53,6 +56,16 @@ func (e *Engine) Load(ctx context.Context, rawURL string, opts LoadOptions) (doc
 		ctr, err = tokens.Default()
 		if err != nil {
 			ctr = &tokens.Counter{}
+		}
+	}
+	enc := e.Encoding
+	if enc == "" {
+		enc = "cl100k_base"
+	}
+	cacheKey := cache.Key(rawURL, string(mode), enc)
+	if e.Cache != nil {
+		if doc, ok, err := e.Cache.Get(cacheKey); err == nil && ok {
+			return doc, nil
 		}
 	}
 
@@ -126,6 +139,9 @@ func (e *Engine) Load(ctx context.Context, rawURL string, opts LoadOptions) (doc
 		OriginalTokens:   origTokens,
 		Attribution:      finalURL,
 	}, ctr)
+	if e.Cache != nil {
+		_ = e.Cache.Put(cacheKey, doc)
+	}
 	return doc, nil
 }
 

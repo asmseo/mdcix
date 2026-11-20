@@ -46,17 +46,31 @@ func ClassifyExtraction(status int, contentType, originalBody, markdown string) 
 }
 
 func looksLikeBotChallenge(s string) bool {
-	needles := []string{
-		"cf-browser-verification", "challenge-platform", "attention required",
-		"verify you are human", "captcha", "access denied", "request blocked",
-		"enable javascript", "checking your browser",
+	// Strong interstitial markers — enough alone.
+	strong := []string{
+		"cf-browser-verification",
+		"challenge-platform",
+		"checking your browser before accessing",
+		"verify you are human",
+		"enable javascript and cookies to continue",
+		"just a moment...",
 	}
-	for _, n := range needles {
+	for _, n := range strong {
 		if strings.Contains(s, n) {
 			return true
 		}
 	}
-	return false
+	// Weaker phrases appear in legitimate docs; require a combination.
+	weak := 0
+	for _, n := range []string{
+		"captcha", "attention required", "access denied", "request blocked",
+		"enable javascript", "checking your browser", "challenge-form",
+	} {
+		if strings.Contains(s, n) {
+			weak++
+		}
+	}
+	return weak >= 2
 }
 
 func looksLikeAuth(s string) bool {
@@ -66,7 +80,14 @@ func looksLikeAuth(s string) bool {
 }
 
 func looksLikePaywall(s string) bool {
-	return strings.Contains(s, "subscribe to read") ||
-		strings.Contains(s, "subscribers only") ||
-		strings.Contains(s, "paywall")
+	// Prefer explicit paywall/subscription interstitials over mere mentions.
+	if strings.Contains(s, "subscribe to read") || strings.Contains(s, "subscribers only") {
+		return true
+	}
+	if strings.Contains(s, "paywall") &&
+		(strings.Contains(s, "subscribe") || strings.Contains(s, "already a subscriber") ||
+			strings.Contains(s, "to continue reading")) {
+		return true
+	}
+	return false
 }

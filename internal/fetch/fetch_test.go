@@ -19,6 +19,20 @@ func TestInjectAccept(t *testing.T) {
 	}
 }
 
+func TestInjectAcceptIfAbsentPreservesExplicit(t *testing.T) {
+	req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req.Header.Set("Accept", "application/json")
+	InjectAcceptIfAbsent(req)
+	if req.Header.Get("Accept") != "application/json" {
+		t.Fatalf("Accept=%q", req.Header.Get("Accept"))
+	}
+	req2, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	InjectAcceptIfAbsent(req2)
+	if !strings.Contains(req2.Header.Get("Accept"), "text/markdown") {
+		t.Fatalf("Accept=%q", req2.Header.Get("Accept"))
+	}
+}
+
 func TestGetHTMLConverts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Accept"), "text/markdown") {

@@ -11,15 +11,17 @@ import (
 
 // Config is the runtime configuration for serve / fetch.
 type Config struct {
-	Listen   string        `yaml:"listen"`
-	Mode     string        `yaml:"mode"` // reader | agent
-	Encoding string        `yaml:"encoding"`
-	MITM     bool          `yaml:"mitm"`
-	CertDir  string        `yaml:"cert_dir"`
-	Insecure bool          `yaml:"insecure"`
-	Timeout  time.Duration `yaml:"timeout"`
-	MaxBody  int64         `yaml:"max_body"`
-	UserAgent string       `yaml:"user_agent"`
+	Listen    string        `yaml:"listen"`
+	Mode      string        `yaml:"mode"` // reader | agent
+	Encoding  string        `yaml:"encoding"`
+	MITM      bool          `yaml:"mitm"`
+	CertDir   string        `yaml:"cert_dir"`
+	Insecure  bool          `yaml:"insecure"`
+	Timeout   time.Duration `yaml:"timeout"`
+	MaxBody   int64         `yaml:"max_body"`
+	UserAgent string        `yaml:"user_agent"`
+	CacheDir  string        `yaml:"cache_dir"` // SQLite document cache directory; empty disables
+	CacheTTL  time.Duration `yaml:"cache_ttl"`
 }
 
 // Default returns sensible MVP defaults.
@@ -33,7 +35,9 @@ func Default() Config {
 		Insecure:  false,
 		Timeout:   30 * time.Second,
 		MaxBody:   8 << 20, // 8 MiB
-		UserAgent: "mdcix/0.1 (+https://github.com/asmseo/mdcix)",
+		UserAgent: "mdcix/0.2 (+https://github.com/asmseo/mdcix)",
+		CacheDir:  "",
+		CacheTTL:  24 * time.Hour,
 	}
 }
 
@@ -70,6 +74,12 @@ func LoadYAML(path string, base Config) (Config, error) {
 	}
 	if overlay.MaxBody > 0 {
 		base.MaxBody = overlay.MaxBody
+	}
+	if overlay.CacheDir != "" {
+		base.CacheDir = overlay.CacheDir
+	}
+	if overlay.CacheTTL > 0 {
+		base.CacheTTL = overlay.CacheTTL
 	}
 	// Bools: only override when key present is hard in yaml.v3 without custom types;
 	// accept explicit true/false from file by checking raw map for mitm/insecure.

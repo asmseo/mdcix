@@ -109,7 +109,7 @@ func Get(ctx context.Context, rawURL string, opts Options) (*Result, error) {
 	}, nil
 }
 
-// InjectAccept sets PreferMarkdown on the request (proxy RoundTripper uses this).
+// InjectAccept sets PreferMarkdown on the request (CLI/gateway fetch paths).
 func InjectAccept(req *http.Request) {
 	if req.Header == nil {
 		req.Header = make(http.Header)
@@ -121,6 +121,18 @@ func InjectAccept(req *http.Request) {
 	}
 	// Ensure text/markdown is first / highest priority.
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(existing)), "text/markdown") {
+		req.Header.Set("Accept", PreferMarkdown)
+	}
+}
+
+// InjectAcceptIfAbsent prefers markdown only when the client left Accept empty or */*.
+// Used by the forward proxy so explicit client preferences (JSON, SSE, etc.) are preserved.
+func InjectAcceptIfAbsent(req *http.Request) {
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
+	existing := strings.TrimSpace(req.Header.Get("Accept"))
+	if existing == "" || existing == "*/*" {
 		req.Header.Set("Accept", PreferMarkdown)
 	}
 }

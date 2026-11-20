@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/asmseo/mdcix/internal/cache"
 	"github.com/asmseo/mdcix/internal/config"
 	"github.com/asmseo/mdcix/internal/context/budget"
 	"github.com/asmseo/mdcix/internal/convert"
@@ -62,11 +63,13 @@ Universal integration: HTTP_PROXY/HTTPS_PROXY → mdcix serve, or CLI/REST/MCP t
 	root.PersistentFlags().StringVar(&cfg.CertDir, "cert-dir", cfg.CertDir, "directory for MITM CA")
 	root.PersistentFlags().BoolVar(&cfg.Insecure, "insecure", cfg.Insecure, "skip upstream TLS verify")
 	root.PersistentFlags().StringVar(&cfg.UserAgent, "user-agent", cfg.UserAgent, "User-Agent for upstream")
+	root.PersistentFlags().StringVar(&cfg.CacheDir, "cache-dir", cfg.CacheDir, "SQLite cache dir (or .db path); empty disables")
 
 	root.AddCommand(serveCmd(&cfg, &cfgPath))
 	root.AddCommand(fetchCmd(&cfg, &cfgPath))
 	root.AddCommand(outlineCmd(&cfg, &cfgPath))
 	root.AddCommand(readCmd(&cfg, &cfgPath))
+	root.AddCommand(cacheCmd(&cfg, &cfgPath))
 	root.AddCommand(versionCmd())
 	root.AddCommand(mcpCmd(&cfg, &cfgPath))
 	return root
@@ -86,13 +89,75 @@ func newEngine(cfg *config.Config) (*gateway.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &gateway.Engine{
+	eng := &gateway.Engine{
 		Counter:   ctr,
 		Mode:      convert.Mode(cfg.Mode),
 		UserAgent: cfg.UserAgent,
 		Timeout:   cfg.Timeout,
 		MaxBody:   cfg.MaxBody,
-	}, nil
+		Encoding:  cfg.Encoding,
+	}
+	if cfg.CacheDir != "" {
+		store, err := cache.Open(cache.DBPath(cfg.CacheDir), cfg.CacheTTL)
+		if err != nil {
+			return nil, fmt.Errorf("cache: %w", err)
+		}
+		eng.Cache = store
+	}
+	return eng, nil
+}
+
+func cacheCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cache",
+		Short: "Inspect or clear the local SQLite document cache",
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "stats",
+		Short: "Print cache entry count",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := loadCfg(*cfgPath, cfg); err != nil {
+				return err
+			}
+			if cfg.CacheDir == "" {
+				return fmt.Errorf("cache disabled; set --cache-dir")
+			}
+			store, err := cache.Open(cache.DBPath(cfg.CacheDir), cfg.CacheTTL)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			n, err := store.Stats()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("cache_path=%s entries=%d\n", cache.DBPath(cfg.CacheDir), n)
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "clear",
+		Short: "Delete all cached documents",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := loadCfg(*cfgPath, cfg); err != nil {
+				return err
+			}
+			if cfg.CacheDir == "" {
+				return fmt.Errorf("cache disabled; set --cache-dir")
+			}
+			store, err := cache.Open(cache.DBPath(cfg.CacheDir), cfg.CacheTTL)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			if err := store.Clear(); err != nil {
+				return err
+			}
+			fmt.Println("cache cleared:", cache.DBPath(cfg.CacheDir))
+			return nil
+		},
+	})
+	return cmd
 }
 
 func serveCmd(cfg *config.Config, cfgPath *string) *cobra.Command {

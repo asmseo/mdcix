@@ -70,11 +70,12 @@ func New(opts Options) *Server {
 	}
 
 	s := &Server{transport: mt, opts: opts}
+	// No Read/WriteTimeout: CONNECT tunnels and SSE/streaming pass-through must not be cut mid-stream.
+	// Header read is still bounded.
 	s.httpServer = &http.Server{
-		Addr:         opts.Addr,
-		Handler:      http.HandlerFunc(s.handle),
-		ReadTimeout:  opts.Timeout,
-		WriteTimeout: opts.Timeout,
+		Addr:              opts.Addr,
+		Handler:           http.HandlerFunc(s.handle),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return s
 }

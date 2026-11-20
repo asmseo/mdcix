@@ -24,6 +24,12 @@ func TestClassifyExtraction(t *testing.T) {
 	if err := ClassifyExtraction(200, "text/html", "cf-browser-verification challenge", ""); err == nil {
 		t.Fatal("expected bot challenge")
 	}
+	// Legitimate docs may mention CAPTCHA/paywalls without being an interstitial.
+	if err := ClassifyExtraction(200, "text/html",
+		"<html><body><p>We do not solve CAPTCHA or paywalls.</p></body></html>",
+		"# Policy\n\nWe do not solve CAPTCHA or paywalls."); err != nil {
+		t.Fatalf("false positive failure class: %v", err)
+	}
 	if err := ClassifyExtraction(200, "text/html", "<html>"+repeat("x", 2000)+"</html>", "  "); err == nil {
 		t.Fatal("expected empty")
 	}

@@ -6,8 +6,22 @@ services:
     ports:
       - "8080:8080"
     volumes:
+      - mdcix-data:/data
       - mdcix-certs:/certs
-    command: ["serve", "--listen", ":8080", "--cert-dir", "/certs", "--mode", "reader"]
+    # One container: REST API + SQLite on /data. For proxy mode, change command to:
+    # ["serve", "--listen", ":8080", "--cert-dir", "/certs", "--mode", "reader"]
+    command:
+      - serve
+      - --api
+      - --listen
+      - :8080
+      - --cache-dir
+      - /data
+      - --cert-dir
+      - /certs
+      - --mode
+      - reader
 
 volumes:
+  mdcix-data:
   mdcix-certs:

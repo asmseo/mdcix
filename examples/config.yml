@@ -17,4 +17,9 @@ cert_dir: ./certs
 # Não use insecure em produção
 insecure: false
 
-user_agent: "mdcix/0.1 (+https://github.com/asmseo/mdcix)"
+user_agent: "mdcix/0.2 (+https://github.com/asmseo/mdcix)"
+
+# SQLite document cache (CLI outline/read, REST, MCP). Empty disables.
+# cache_dir: ./data
+# cache_ttl: 24h
+
