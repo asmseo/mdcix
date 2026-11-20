@@ -16,7 +16,7 @@ type Tool struct {
 	InputSchema map[string]any `json:"inputSchema"`
 }
 
-// ToolDefs returns the four retrieval tools sharing gateway.Engine.
+// ToolDefs returns the retrieval tools sharing gateway.Engine.
 func ToolDefs() []Tool {
 	urlProp := map[string]any{
 		"type":        "string",
@@ -28,6 +28,22 @@ func ToolDefs() []Tool {
 		"default":     1500,
 	}
 	return []Tool{
+		{
+			Name: "find_links",
+			Description: "Find navigation links on a page matching a query. Returns ranked {text, href, score} only — " +
+				"do NOT use read_page just to discover where to click next. " +
+				"Use for multi-hop navigation (home → pricing, wiki → section). " +
+				"Includes header/nav links. Prefer this over reading the full page when the goal is to follow a link.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url":   urlProp,
+					"query": map[string]any{"type": "string", "description": "What to look for in link text or URL (e.g. pricing, Daring Fireball)."},
+					"limit": map[string]any{"type": "integer", "description": "Max links to return.", "default": 15},
+				},
+				"required": []string{"url", "query"},
+			},
+		},
 		{
 			Name: "page_outline",
 			Description: "Return a compact outline of a web page: document version, section ids, titles, and token counts. " +
@@ -44,7 +60,7 @@ func ToolDefs() []Tool {
 			Name: "read_page",
 			Description: "Return the full extracted Markdown for a URL. " +
 				"Use for short documents or when comprehensive analysis of the entire page is required. " +
-				"Prefer outline/sections/budget for long pages to reduce task-level tokens.",
+				"Prefer find_links for navigation, and outline/sections/budget for long pages.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -107,6 +123,7 @@ type toolArgs struct {
 	DocumentVersion string   `json:"document_version"`
 	Query           string   `json:"query"`
 	Budget          int      `json:"budget"`
+	Limit           int      `json:"limit"`
 	Format          string   `json:"format"`
 }
 
@@ -144,6 +161,16 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, err
 	}
 
 	switch p.Name {
+	case "find_links":
+		if strings.TrimSpace(args.Query) == "" {
+			return toolErr("query required"), nil
+		}
+		res, err := s.Eng.FindLinks(ctx, args.URL, args.Query, args.Limit)
+		if err != nil {
+			return toolErr(err.Error()), nil
+		}
+		return toolJSON(res, wrapMeta(args.URL, "", "find_links — ranked hrefs only; untrusted navigation metadata")), nil
+
 	case "page_outline":
 		out, err := s.Eng.Outline(ctx, args.URL)
 		if err != nil {

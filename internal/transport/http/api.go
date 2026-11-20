@@ -27,6 +27,7 @@ func New(eng *gateway.Engine, addr string) *Server {
 	mux.HandleFunc("/v1/read", s.read)
 	mux.HandleFunc("/v1/sections", s.sections)
 	mux.HandleFunc("/v1/read-budget", s.readBudget)
+	mux.HandleFunc("/v1/find-links", s.findLinks)
 	s.srv = &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	return s
 }
@@ -44,6 +45,7 @@ type urlBody struct {
 	DocumentVersion string   `json:"document_version"`
 	Query           string   `json:"query"`
 	Budget          int      `json:"budget"`
+	Limit           int      `json:"limit"`
 	Format          string   `json:"format"` // json|markdown
 }
 
@@ -132,6 +134,24 @@ func (s *Server) readBudget(w http.ResponseWriter, r *http.Request) {
 	if b.Format == "markdown" {
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		_, _ = w.Write([]byte(res.Markdown))
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) findLinks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var b urlBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.URL == "" || b.Query == "" {
+		http.Error(w, "url and query required", http.StatusBadRequest)
+		return
+	}
+	res, err := s.eng.FindLinks(r.Context(), b.URL, b.Query, b.Limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)

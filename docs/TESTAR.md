@@ -191,7 +191,14 @@ printf '%s\n' \
 | ./mdcix mcp --allow-private --mitm=false
 ```
 
-OK: `initialize` com `serverInfo.name=mdcix`; `tools/list` traz `page_outline`, `read_page`, `read_sections`, `read_budget`.
+OK: `initialize` com `serverInfo.name=mdcix`; `tools/list` traz `find_links`, `page_outline`, `read_page`, `read_sections`, `read_budget`.
+
+```bash
+./mdcix links https://basecamp.com/ --query "pricing plans" --limit 5
+./mdcix links https://www.rdstation.com/ --query "preços planos" --limit 5
+```
+
+OK: JSON com `matches[].href` apontando para pricing / precos, sem o corpo da página.
 
 Cursor / Claude Desktop:
 

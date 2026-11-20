@@ -75,6 +75,7 @@ Universal integration: HTTP_PROXY/HTTPS_PROXY → mdcix serve, or CLI/REST/MCP t
 	root.AddCommand(fetchCmd(&cfg, &cfgPath))
 	root.AddCommand(outlineCmd(&cfg, &cfgPath))
 	root.AddCommand(readCmd(&cfg, &cfgPath))
+	root.AddCommand(linksCmd(&cfg, &cfgPath))
 	root.AddCommand(cacheCmd(&cfg, &cfgPath))
 	root.AddCommand(versionCmd())
 	root.AddCommand(mcpCmd(&cfg, &cfgPath))
@@ -321,6 +322,38 @@ func outlineCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 	}
 }
 
+func linksCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
+	var query string
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "links <url>",
+		Short: "Find ranked navigation links matching a query (without reading the page body)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := loadCfg(*cfgPath, cfg); err != nil {
+				return err
+			}
+			if strings.TrimSpace(query) == "" {
+				return fmt.Errorf("--query is required")
+			}
+			eng, err := newEngine(cfg)
+			if err != nil {
+				return err
+			}
+			res, err := eng.FindLinks(cmd.Context(), args[0], query, limit)
+			if err != nil {
+				return err
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(res)
+		},
+	}
+	cmd.Flags().StringVar(&query, "query", "", "link text / URL query (e.g. pricing)")
+	cmd.Flags().IntVar(&limit, "limit", 15, "max links to return")
+	return cmd
+}
+
 func readCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 	var sections string
 	var query string
@@ -414,10 +447,11 @@ func versionCmd() *cobra.Command {
 func mcpCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
-		Short: "MCP stdio server (tools: page_outline, read_page, read_sections, read_budget)",
+		Short: "MCP stdio server (tools: find_links, page_outline, read_page, read_sections, read_budget)",
 		Long: `MCP tools share the same gateway engine as CLI/REST.
 
-Use outline when sections are unknown; multi-section when known; budget for targeted queries;
+Navigation: find_links to discover the next URL (do not read_page just to click).
+Content: outline when sections are unknown; multi-section when known; budget for targeted queries;
 full page for short docs. Prefer agent-selected mode for cross-language tasks.
 
 Configure Cursor / Claude Desktop with:
@@ -433,7 +467,7 @@ Configure Cursor / Claude Desktop with:
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			srv := mcp.New(eng, "mdcix", version)
-			log.Printf("mdcix MCP stdio ready (page_outline|read_page|read_sections|read_budget)")
+			log.Printf("mdcix MCP stdio ready (find_links|page_outline|read_page|read_sections|read_budget)")
 			return srv.Run(ctx)
 		},
 	}

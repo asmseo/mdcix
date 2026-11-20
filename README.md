@@ -23,6 +23,7 @@ Agentes gastam tokens em HTML ruidoso. O mdcix:
 
 ```bash
 mdcix fetch https://example.com
+mdcix links https://example.com --query pricing   # navegação: só hrefs relevantes
 mdcix outline https://example.com
 mdcix read https://example.com
 mdcix read https://example.com --sections pricing,integrations --budget 2000
@@ -30,8 +31,8 @@ mdcix read https://example.com --query "pricing plans" --budget 1500
 mdcix --plain read https://example.com          # sem URLs (opt-in; default mantém links)
 mdcix --render-js=auto outline https://spa.example  # Chrome headless se extração estática vier fina
 mdcix serve                 # proxy HTTP_PROXY
-mdcix serve --api           # REST /v1/outline|/v1/read|/v1/sections|/v1/read-budget
-mdcix mcp                   # MCP stdio (page_outline|read_page|read_sections|read_budget)
+mdcix serve --api           # REST + /v1/find-links
+mdcix mcp                   # MCP (find_links|page_outline|read_page|read_sections|read_budget)
 mdcix cache stats --cache-dir ./data
 mdcix cache clear --cache-dir ./data
 ```
@@ -134,7 +135,7 @@ O mesmo `gateway.Engine` do CLI/REST é exposto via Model Context Protocol:
 mdcix mcp
 ```
 
-Tools: `page_outline`, `read_page`, `read_sections`, `read_budget`. Conteúdo web volta delimitado como material não confiável.
+Tools: `find_links`, `page_outline`, `read_page`, `read_sections`, `read_budget`. Conteúdo web volta delimitado como material não confiável. Para multi-hop, use `find_links` antes de `read_*`.
 
 Exemplo Cursor / Claude Desktop (`mcp.json`):
 

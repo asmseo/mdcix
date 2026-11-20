@@ -14,6 +14,7 @@ import (
 	"github.com/asmseo/mdcix/internal/convert"
 	"github.com/asmseo/mdcix/internal/document"
 	"github.com/asmseo/mdcix/internal/fetch"
+	"github.com/asmseo/mdcix/internal/links"
 	"github.com/asmseo/mdcix/internal/policy"
 	"github.com/asmseo/mdcix/internal/render"
 	"github.com/asmseo/mdcix/internal/security"
@@ -379,6 +380,113 @@ func (e *Engine) ReadBudget(ctx context.Context, rawURL, query string, tokBudget
 		return budget.Response{}, err
 	}
 	return budget.Select(doc, budget.Request{Query: query, Budget: tokBudget}, e.Counter), nil
+}
+
+// FindLinks returns ranked hyperlinks for navigation without dumping page body.
+// Unlike Load, it keeps nav/header anchors (browser-style find).
+func (e *Engine) FindLinks(ctx context.Context, rawURL, query string, limit int) (links.Result, error) {
+	start := time.Now()
+	if !e.AllowPrivate {
+		if err := security.ValidatePublicURL(rawURL); err != nil {
+			return links.Result{}, err
+		}
+	}
+	if e.Policy != nil {
+		dec := e.Policy.Evaluate(ctx, rawURL)
+		if !dec.Allow {
+			return links.Result{}, fmt.Errorf("policy denied: %v", dec.Warnings)
+		}
+	}
+	if limit <= 0 {
+		limit = 15
+	}
+
+	html, finalURL, jsUsed, warnings, err := e.fetchHTMLForLinks(ctx, rawURL)
+	if err != nil {
+		return links.Result{}, err
+	}
+	res, err := links.Find(html, finalURL, links.Options{Query: query, Limit: limit})
+	if err != nil {
+		return links.Result{}, err
+	}
+	res.URL = rawURL
+	res.FinalURL = finalURL
+	res.JSRendered = jsUsed
+	res.Warnings = append(warnings, res.Warnings...)
+	e.record("find_links", start, map[string]int{
+		"total_links": res.TotalLinks,
+		"returned":    res.Returned,
+	}, map[string]string{"js": fmt.Sprintf("%v", jsUsed)})
+	return res, nil
+}
+
+func (e *Engine) fetchHTMLForLinks(ctx context.Context, rawURL string) (html, finalURL string, jsUsed bool, warnings []string, err error) {
+	ua := e.UserAgent
+	if ua == "" {
+		ua = "mdcix/0.2 (+https://github.com/asmseo/mdcix)"
+	}
+	jsMode := e.RenderJS
+	if jsMode == "" {
+		jsMode = render.ModeOff
+	}
+	finalURL = rawURL
+
+	if jsMode == render.ModeOn {
+		rendered, rerr := e.renderHTML(ctx, rawURL, ua)
+		if rerr != nil {
+			return "", "", false, nil, rerr
+		}
+		return rendered, rawURL, true, []string{"js_rendered:headless_chrome"}, nil
+	}
+
+	client := e.Client
+	if client == nil {
+		to := e.Timeout
+		if to <= 0 {
+			to = 30 * time.Second
+		}
+		client = &http.Client{Timeout: to}
+	}
+	maxBody := e.MaxBody
+	if maxBody <= 0 {
+		maxBody = 8 << 20
+	}
+	req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if rerr != nil {
+		return "", "", false, nil, rerr
+	}
+	fetch.InjectAccept(req)
+	req.Header.Set("User-Agent", ua)
+	resp, rerr := client.Do(req)
+	if rerr != nil {
+		return "", "", false, nil, rerr
+	}
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	_ = resp.Body.Close()
+	if rerr != nil {
+		return "", "", false, nil, rerr
+	}
+	html = string(body)
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+
+	probe, _ := links.Find(html, finalURL, links.Options{Query: "", Limit: 50})
+	needJS := jsMode == render.ModeAuto && (probe.TotalLinks < 3 || render.NeedsAuto(html, ""))
+	if needJS {
+		rendered, rerr := e.renderHTML(ctx, rawURL, ua)
+		if rerr != nil {
+			warnings = append(warnings, "js_render_failed:"+rerr.Error())
+		} else {
+			html = rendered
+			jsUsed = true
+			warnings = append(warnings, "js_rendered:headless_chrome")
+		}
+	}
+	if strings.TrimSpace(html) == "" {
+		return "", "", jsUsed, warnings, fmt.Errorf("empty_extraction: no HTML for link discovery")
+	}
+	return html, finalURL, jsUsed, warnings, nil
 }
 
 func looksHTML(s string) bool {

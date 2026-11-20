@@ -41,8 +41,9 @@ Flags do processo MCP (não por tool call): `--plain`, `--render-js=off|auto|on`
 
 | Tool | Quando usar |
 |------|-------------|
+| `find_links` | Navegação: achar o próximo `href` sem ler a página |
 | `page_outline` | Seções desconhecidas; páginas longas |
-| `read_page` | Docs curtos ou análise completa |
+| `read_page` | Docs curtos ou análise completa (não use só pra achar link) |
 | `read_sections` | Ids conhecidos (modo agent-selected; melhor cross-language) |
 | `read_budget` | Query + orçamento lexical (BM25; same-language) |
 

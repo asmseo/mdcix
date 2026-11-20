@@ -18,13 +18,14 @@ import (
 func TestToolDefsSchema(t *testing.T) {
 	tools := ToolDefs()
 	want := map[string]bool{
+		"find_links":    false,
 		"page_outline":  false,
 		"read_page":     false,
 		"read_sections": false,
 		"read_budget":   false,
 	}
-	if len(tools) != 4 {
-		t.Fatalf("want 4 tools, got %d", len(tools))
+	if len(tools) != 5 {
+		t.Fatalf("want 5 tools, got %d", len(tools))
 	}
 	for _, tool := range tools {
 		if _, ok := want[tool.Name]; !ok {
@@ -113,7 +114,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &listResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(listResp.Result.Tools) != 4 {
+	if len(listResp.Result.Tools) != 5 {
 		t.Fatalf("tools/list: got %d", len(listResp.Result.Tools))
 	}
 }
