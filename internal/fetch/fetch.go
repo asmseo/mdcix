@@ -29,6 +29,7 @@ const (
 // Options configure an upstream fetch + conversion.
 type Options struct {
 	Mode      convert.Mode
+	Plain     bool
 	UserAgent string
 	Timeout   time.Duration
 	MaxBody   int64
@@ -91,7 +92,7 @@ func Get(ctx context.Context, rawURL string, opts Options) (*Result, error) {
 	}
 
 	ct := resp.Header.Get("Content-Type")
-	md, source, err := toMarkdown(string(body), ct, rawURL, opts.Mode)
+	md, source, err := toMarkdown(string(body), ct, rawURL, opts.Mode, opts.Plain)
 	if err != nil {
 		return nil, err
 	}
@@ -146,18 +147,26 @@ func ApplySavingsHeaders(h http.Header, sv tokens.Savings) {
 	h.Set(HeaderSource, sv.Source)
 }
 
-func toMarkdown(body, ct, pageURL string, mode convert.Mode) (md, source string, err error) {
+func toMarkdown(body, ct, pageURL string, mode convert.Mode, plain bool) (md, source string, err error) {
 	if convert.IsMarkdown(ct) {
 		r := convert.Passthrough(body)
-		return r.Markdown, r.Source, nil
+		out := r.Markdown
+		if plain {
+			out = convert.StripLinks(out)
+		}
+		return out, r.Source, nil
 	}
 	// Heuristic: body already looks like markdown and CT is plain/empty.
 	if !convert.IsHTML(ct) && looksLikeMarkdown(body) {
 		r := convert.Passthrough(body)
-		return r.Markdown, r.Source, nil
+		out := r.Markdown
+		if plain {
+			out = convert.StripLinks(out)
+		}
+		return out, r.Source, nil
 	}
 	if convert.IsHTML(ct) || looksLikeHTML(body) {
-		res, err := convert.HTMLToMarkdown(body, convert.Options{Mode: mode, BaseURL: pageURL})
+		res, err := convert.HTMLToMarkdown(body, convert.Options{Mode: mode, BaseURL: pageURL, Plain: plain})
 		if err != nil {
 			return "", "", err
 		}
@@ -165,7 +174,11 @@ func toMarkdown(body, ct, pageURL string, mode convert.Mode) (md, source string,
 	}
 	// Unknown binary-ish: return as fenced plain text stub.
 	r := convert.Passthrough(body)
-	return r.Markdown, "native", nil
+	out := r.Markdown
+	if plain {
+		out = convert.StripLinks(out)
+	}
+	return out, "native", nil
 }
 
 func looksLikeHTML(s string) bool {

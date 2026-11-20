@@ -11,22 +11,25 @@ import (
 
 // Config is the runtime configuration for serve / fetch.
 type Config struct {
-	Listen           string        `yaml:"listen"`
-	Mode             string        `yaml:"mode"` // reader | agent
-	Encoding         string        `yaml:"encoding"`
-	MITM             bool          `yaml:"mitm"`
-	CertDir          string        `yaml:"cert_dir"`
-	Insecure         bool          `yaml:"insecure"`
-	Timeout          time.Duration `yaml:"timeout"`
-	MaxBody          int64         `yaml:"max_body"`
-	UserAgent        string        `yaml:"user_agent"`
-	CacheDir         string        `yaml:"cache_dir"`
-	CacheTTL         time.Duration `yaml:"cache_ttl"`
-	MaxCacheEntries  int           `yaml:"max_cache_entries"`
-	AllowPrivate     bool          `yaml:"allow_private"`
-	Telemetry        bool          `yaml:"telemetry"` // default false
-	SkipRobots       bool          `yaml:"skip_robots"`
-	PolicyEnabled    bool          `yaml:"policy_enabled"`
+	Listen          string        `yaml:"listen"`
+	Mode            string        `yaml:"mode"`  // reader | agent
+	Plain           bool          `yaml:"plain"` // strip markdown links (opt-in)
+	RenderJS        string        `yaml:"render_js"` // off | auto | on
+	RenderTimeout   time.Duration `yaml:"render_timeout"`
+	Encoding        string        `yaml:"encoding"`
+	MITM            bool          `yaml:"mitm"`
+	CertDir         string        `yaml:"cert_dir"`
+	Insecure        bool          `yaml:"insecure"`
+	Timeout         time.Duration `yaml:"timeout"`
+	MaxBody         int64         `yaml:"max_body"`
+	UserAgent       string        `yaml:"user_agent"`
+	CacheDir        string        `yaml:"cache_dir"`
+	CacheTTL        time.Duration `yaml:"cache_ttl"`
+	MaxCacheEntries int           `yaml:"max_cache_entries"`
+	AllowPrivate    bool          `yaml:"allow_private"`
+	Telemetry       bool          `yaml:"telemetry"` // default false
+	SkipRobots      bool          `yaml:"skip_robots"`
+	PolicyEnabled   bool          `yaml:"policy_enabled"`
 }
 
 // Default returns sensible MVP defaults.
@@ -46,6 +49,8 @@ func Default() Config {
 		MaxCacheEntries: 0,
 		Telemetry:       false,
 		PolicyEnabled:   true,
+		RenderJS:        "off",
+		RenderTimeout:   20 * time.Second,
 	}
 }
 
@@ -67,6 +72,12 @@ func LoadYAML(path string, base Config) (Config, error) {
 	}
 	if overlay.Mode != "" {
 		base.Mode = overlay.Mode
+	}
+	if overlay.RenderJS != "" {
+		base.RenderJS = overlay.RenderJS
+	}
+	if overlay.RenderTimeout > 0 {
+		base.RenderTimeout = overlay.RenderTimeout
 	}
 	if overlay.Encoding != "" {
 		base.Encoding = overlay.Encoding
@@ -111,6 +122,9 @@ func LoadYAML(path string, base Config) (Config, error) {
 	}
 	if _, ok := raw["policy_enabled"]; ok {
 		base.PolicyEnabled = overlay.PolicyEnabled
+	}
+	if _, ok := raw["plain"]; ok {
+		base.Plain = overlay.Plain
 	}
 	return base, nil
 }

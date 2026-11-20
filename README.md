@@ -27,6 +27,8 @@ mdcix outline https://example.com
 mdcix read https://example.com
 mdcix read https://example.com --sections pricing,integrations --budget 2000
 mdcix read https://example.com --query "pricing plans" --budget 1500
+mdcix --plain read https://example.com          # sem URLs (opt-in; default mantém links)
+mdcix --render-js=auto outline https://spa.example  # Chrome headless se extração estática vier fina
 mdcix serve                 # proxy HTTP_PROXY
 mdcix serve --api           # REST /v1/outline|/v1/read|/v1/sections|/v1/read-budget
 mdcix mcp                   # MCP stdio (page_outline|read_page|read_sections|read_budget)
@@ -35,6 +37,8 @@ mdcix cache clear --cache-dir ./data
 ```
 
 Cache SQLite (opcional): `--cache-dir ./data` no CLI/REST/MCP.
+
+Flags úteis: `--plain` (texto sem links), `--render-js=off|auto|on` (JS via Chrome local), `--mode reader|agent`.
 
 ## Documentação
 

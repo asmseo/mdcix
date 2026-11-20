@@ -30,11 +30,14 @@ Registre o servidor no cliente MCP (Cursor / Claude Desktop):
   "mcpServers": {
     "mdcix": {
       "command": "mdcix",
-      "args": ["mcp"]
+      "args": ["--render-js=auto", "--cache-dir", "/Users/YOU/mdcix-data", "mcp"]
     }
   }
 }
 ```
+
+Flags do processo MCP (não por tool call): `--plain`, `--render-js=off|auto|on`, `--mode reader|agent`.  
+`--plain` é opt-in (default mantém links para navegação). `--render-js=auto` só dispara Chrome quando a extração estática vem vazia/fina (SPA).
 
 | Tool | Quando usar |
 |------|-------------|

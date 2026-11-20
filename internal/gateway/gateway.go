@@ -15,6 +15,7 @@ import (
 	"github.com/asmseo/mdcix/internal/document"
 	"github.com/asmseo/mdcix/internal/fetch"
 	"github.com/asmseo/mdcix/internal/policy"
+	"github.com/asmseo/mdcix/internal/render"
 	"github.com/asmseo/mdcix/internal/security"
 	"github.com/asmseo/mdcix/internal/telemetry"
 	"github.com/asmseo/mdcix/internal/tokens"
@@ -24,6 +25,9 @@ import (
 type Engine struct {
 	Counter      *tokens.Counter
 	Mode         convert.Mode
+	Plain        bool // strip navigational links (opt-in)
+	RenderJS     render.Mode
+	RenderWait   time.Duration
 	UserAgent    string
 	Timeout      time.Duration
 	MaxBody      int64
@@ -39,6 +43,8 @@ type Engine struct {
 type LoadOptions struct {
 	Mode            convert.Mode
 	DocumentVersion string // when set, warn if snapshot mismatches
+	Plain           *bool
+	RenderJS        render.Mode // empty = engine default
 }
 
 // Load retrieves and builds a structured Document.
@@ -56,6 +62,18 @@ func (e *Engine) Load(ctx context.Context, rawURL string, opts LoadOptions) (doc
 	if mode == "" {
 		mode = convert.ModeReader
 	}
+	plain := e.Plain
+	if opts.Plain != nil {
+		plain = *opts.Plain
+	}
+	jsMode := e.RenderJS
+	if opts.RenderJS != "" {
+		jsMode = opts.RenderJS
+	}
+	if jsMode == "" {
+		jsMode = render.ModeOff
+	}
+
 	ctr := e.Counter
 	if ctr == nil {
 		var err error
@@ -68,7 +86,7 @@ func (e *Engine) Load(ctx context.Context, rawURL string, opts LoadOptions) (doc
 	if enc == "" {
 		enc = "cl100k_base"
 	}
-	cacheKey := cache.Key(rawURL, string(mode), enc)
+	cacheKey := cache.KeyFull(rawURL, string(mode), enc, plain, string(jsMode))
 
 	var policyDec policy.Decision
 	if e.Policy != nil {
@@ -80,12 +98,10 @@ func (e *Engine) Load(ctx context.Context, rawURL string, opts LoadOptions) (doc
 
 	if e.Cache != nil {
 		if doc, meta, ok, err := e.Cache.GetWithMeta(cacheKey); err == nil && ok {
-			// Within TTL: serve cached. If validators exist, probe If-None-Match;
-			// on 304 keep cache; on 200 fall through to replace; on network error keep stale.
 			if meta.ETag != "" || meta.LastModified != "" {
 				status, err := e.conditionalStatus(ctx, rawURL, meta)
 				if err == nil && status == http.StatusOK {
-					// upstream changed — fall through to full fetch
+					// upstream changed — fall through
 				} else {
 					e.record("cache_hit", start, map[string]int{"hit": 1}, map[string]string{"revalidate": fmt.Sprintf("%d", status)})
 					return withVersionWarn(doc, opts.DocumentVersion), nil
@@ -110,64 +126,142 @@ func (e *Engine) Load(ctx context.Context, rawURL string, opts LoadOptions) (doc
 		maxBody = 8 << 20
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return document.Document{}, err
-	}
-	fetch.InjectAccept(req)
 	ua := e.UserAgent
 	if ua == "" {
 		ua = "mdcix/0.2 (+https://github.com/asmseo/mdcix)"
 	}
-	req.Header.Set("User-Agent", ua)
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return document.Document{}, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	if err != nil {
-		return document.Document{}, err
-	}
-	ct := resp.Header.Get("Content-Type")
-	orig := string(body)
-	origTokens := ctr.Count(orig)
+	var (
+		orig       string
+		ct         string
+		status     int
+		finalURL   = rawURL
+		etag       string
+		lastMod    string
+		cacheCtl   string
+		vary       string
+		usedRender bool
+		warnings   []string
+	)
 
+	forceJS := jsMode == render.ModeOn
+	if !forceJS {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return document.Document{}, err
+		}
+		fetch.InjectAccept(req)
+		req.Header.Set("User-Agent", ua)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return document.Document{}, err
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+		_ = resp.Body.Close()
+		if err != nil {
+			return document.Document{}, err
+		}
+		orig = string(body)
+		ct = resp.Header.Get("Content-Type")
+		status = resp.StatusCode
+		etag = resp.Header.Get("ETag")
+		lastMod = resp.Header.Get("Last-Modified")
+		cacheCtl = resp.Header.Get("Cache-Control")
+		vary = resp.Header.Get("Vary")
+		if resp.Request != nil && resp.Request.URL != nil {
+			finalURL = resp.Request.URL.String()
+		}
+	}
+
+	convertOpts := convert.Options{Mode: mode, BaseURL: finalURL, Plain: plain}
 	var md string
 	method := "converted"
-	if convert.IsMarkdown(ct) {
-		md = strings.TrimSpace(orig)
-		method = "native"
-	} else if convert.IsHTML(ct) || looksHTML(orig) {
-		res, err := convert.HTMLToMarkdown(orig, convert.Options{Mode: mode, BaseURL: resp.Request.URL.String()})
-		if err != nil {
-			return document.Document{}, fmt.Errorf("convert: %w", err)
+
+	buildMD := func(htmlOrBody, contentType string) (string, string, error) {
+		if convert.IsMarkdown(contentType) {
+			out := strings.TrimSpace(htmlOrBody)
+			if plain {
+				out = convert.StripLinks(out)
+			}
+			return out, "native", nil
 		}
-		md = res.Markdown
-		method = "converted"
-	} else {
-		md = strings.TrimSpace(orig)
-		method = "native"
+		if convert.IsHTML(contentType) || looksHTML(htmlOrBody) {
+			res, err := convert.HTMLToMarkdown(htmlOrBody, convertOpts)
+			if err != nil {
+				return "", "", err
+			}
+			return res.Markdown, "converted", nil
+		}
+		out := strings.TrimSpace(htmlOrBody)
+		if plain {
+			out = convert.StripLinks(out)
+		}
+		return out, "native", nil
 	}
 
-	if err := security.ClassifyExtraction(resp.StatusCode, ct, orig, md); err != nil {
+	if forceJS {
+		html, err := e.renderHTML(ctx, rawURL, ua)
+		if err != nil {
+			e.record("render_failure", start, nil, map[string]string{"reason": err.Error()})
+			return document.Document{}, err
+		}
+		orig = html
+		ct = "text/html; charset=utf-8"
+		status = 200
+		usedRender = true
+		warnings = append(warnings, "js_rendered:headless_chrome")
+	}
+
+	var err error
+	md, method, err = buildMD(orig, ct)
+	if err != nil {
+		return document.Document{}, fmt.Errorf("convert: %w", err)
+	}
+
+	needJS := jsMode == render.ModeAuto && !usedRender &&
+		(security.ClassifyExtraction(status, ct, orig, md) != nil || render.NeedsAuto(orig, md))
+
+	if needJS {
+		html, rerr := e.renderHTML(ctx, rawURL, ua)
+		if rerr != nil {
+			warnings = append(warnings, "js_render_failed:"+rerr.Error())
+			// keep static result; if classify fails, surface that error
+			if cerr := security.ClassifyExtraction(status, ct, orig, md); cerr != nil {
+				e.record("extraction_failure", start, nil, map[string]string{"reason": cerr.Error()})
+				return document.Document{}, cerr
+			}
+		} else {
+			orig = html
+			ct = "text/html; charset=utf-8"
+			status = 200
+			usedRender = true
+			warnings = append(warnings, "js_rendered:auto_headless_chrome")
+			md, method, err = buildMD(orig, ct)
+			if err != nil {
+				return document.Document{}, fmt.Errorf("convert: %w", err)
+			}
+		}
+	}
+
+	if err := security.ClassifyExtraction(status, ct, orig, md); err != nil {
 		e.record("extraction_failure", start, nil, map[string]string{"reason": err.Error()})
 		return document.Document{}, err
 	}
 
-	finalURL := rawURL
-	if resp.Request != nil && resp.Request.URL != nil {
-		finalURL = resp.Request.URL.String()
-	}
+	origTokens := ctr.Count(orig)
 	doc := document.BuildFromMarkdown(md, document.Document{
 		URL:              rawURL,
 		FinalURL:         finalURL,
-		HTTPStatus:       resp.StatusCode,
+		HTTPStatus:       status,
 		ExtractionMethod: method,
 		OriginalTokens:   origTokens,
 		Attribution:      finalURL,
+		Warnings:         warnings,
 	}, ctr)
+	if usedRender {
+		doc.ExtractionMethod = method + "+js"
+	}
 	if e.Policy != nil {
 		doc.Warnings = append(doc.Warnings, policyDec.Warnings...)
 		doc.Warnings = append(doc.Warnings, policy.ContentSignalsNote())
@@ -177,14 +271,31 @@ func (e *Engine) Load(ctx context.Context, rawURL string, opts LoadOptions) (doc
 	}
 	doc = withVersionWarn(doc, opts.DocumentVersion)
 	if e.Cache != nil {
-		_ = e.Cache.PutWithMeta(cacheKey, doc, metaFromResp(resp))
+		_ = e.Cache.PutWithMeta(cacheKey, doc, cache.EntryMeta{
+			ETag:         etag,
+			LastModified: lastMod,
+			CacheControl: cacheCtl,
+			Vary:         vary,
+		})
 	}
 	e.record("load", start, map[string]int{
 		"original_tokens": doc.OriginalTokens,
 		"markdown_tokens": doc.MarkdownTokens,
 		"sections":        len(doc.Sections),
-	}, map[string]string{"method": method})
+	}, map[string]string{"method": doc.ExtractionMethod, "js": string(jsMode)})
 	return doc, nil
+}
+
+func (e *Engine) renderHTML(ctx context.Context, rawURL, ua string) (string, error) {
+	wait := e.RenderWait
+	if wait <= 0 {
+		wait = 15 * time.Second
+	}
+	return render.HTML(ctx, rawURL, render.Options{
+		Timeout:   wait,
+		UserAgent: ua,
+		WaitMS:    8000,
+	})
 }
 
 func withVersionWarn(doc document.Document, want string) document.Document {
@@ -218,18 +329,6 @@ func (e *Engine) conditionalStatus(ctx context.Context, rawURL string, meta cach
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode, nil
-}
-
-func metaFromResp(resp *http.Response) cache.EntryMeta {
-	if resp == nil {
-		return cache.EntryMeta{}
-	}
-	return cache.EntryMeta{
-		ETag:         resp.Header.Get("ETag"),
-		LastModified: resp.Header.Get("Last-Modified"),
-		CacheControl: resp.Header.Get("Cache-Control"),
-		Vary:         resp.Header.Get("Vary"),
-	}
 }
 
 func (e *Engine) record(name string, start time.Time, ints map[string]int, labels map[string]string) {

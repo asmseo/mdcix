@@ -4,6 +4,8 @@
 //   - reader: article/main content only (maximum token savings)
 //   - agent:  article plus useful links (better for agent navigation)
 //
+// Plain (opt-in): strip markdown links/images to bare text while keeping structure.
+//
 // Ideas inspired by md-browse (Accept preference / cleanup) and webforai
 // (reader vs agent). All code here is original MIT.
 package convert
@@ -31,6 +33,7 @@ const (
 type Options struct {
 	Mode    Mode
 	BaseURL string // resolve relative links when set
+	Plain   bool   // strip markdown links/images to text (opt-in; default keeps navigational links)
 }
 
 // Result is the converted Markdown plus provenance.
@@ -44,6 +47,8 @@ var (
 	dataURILink  = regexp.MustCompile(`\[[^\]]*\]\(data:[^)]+\)`)
 	multiBlank   = regexp.MustCompile(`\n{3,}`)
 	emptyListNum = regexp.MustCompile(`(?m)^\d+\.\s*$`)
+	mdLink       = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
+	mdImage      = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
 )
 
 // IsHTML reports whether Content-Type looks like HTML.
@@ -86,17 +91,28 @@ func HTMLToMarkdown(html string, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("html-to-markdown: %w", err)
 	}
 
-	if opts.Mode == ModeAgent {
+	if opts.Mode == ModeAgent && !opts.Plain {
 		md = appendUsefulLinks(md, doc, opts.BaseURL)
 	}
 
 	md = cleanupMarkdown(md)
+	if opts.Plain {
+		md = StripLinks(md)
+	}
 	return Result{Markdown: md, Source: "converted"}, nil
 }
 
 // Passthrough wraps already-markdown body.
 func Passthrough(body string) Result {
 	return Result{Markdown: strings.TrimSpace(body), Source: "native"}
+}
+
+// StripLinks removes markdown links/images, keeping link labels (navigational URLs gone).
+func StripLinks(md string) string {
+	md = mdImage.ReplaceAllString(md, "")
+	md = mdLink.ReplaceAllString(md, "$1")
+	md = multiBlank.ReplaceAllString(md, "\n\n")
+	return strings.TrimSpace(md)
 }
 
 func stripNoise(doc *goquery.Document) {
@@ -106,26 +122,51 @@ func stripNoise(doc *goquery.Document) {
 }
 
 func extractContent(doc *goquery.Document, mode Mode) *goquery.Selection {
-	candidates := []string{
-		"article",
+	_ = mode
+	type cand struct {
+		sel  *goquery.Selection
+		text string
+		n    int
+	}
+	selectors := []string{
 		"main",
 		"[role='main']",
+		"article",
 		"#content",
 		"#main",
 		".post-content",
 		".article-body",
 		".entry-content",
 	}
-	for _, sel := range candidates {
-		if node := doc.Find(sel).First(); node.Length() > 0 {
+	var best cand
+	for _, sel := range selectors {
+		doc.Find(sel).Each(func(_ int, node *goquery.Selection) {
 			text := strings.TrimSpace(node.Text())
-			if len(text) > 40 {
-				return node
+			n := len([]rune(text))
+			if n <= 40 {
+				return
 			}
+			if n > best.n {
+				best = cand{sel: node, text: text, n: n}
+			}
+		})
+	}
+
+	body := doc.Find("body")
+	bodyText := ""
+	bodyN := 0
+	if body.Length() > 0 {
+		bodyText = strings.TrimSpace(body.Text())
+		bodyN = len([]rune(bodyText))
+	}
+
+	// Prefer best semantic region when it covers a meaningful share of the body.
+	// Tiny first-<article> teaser (e.g. Basecamp promo blurb) must not win over <main>.
+	if best.sel != nil && best.n > 0 {
+		if bodyN == 0 || best.n*5 >= bodyN || best.n >= 800 {
+			return best.sel
 		}
 	}
-	// Fall back to body (already noise-stripped).
-	body := doc.Find("body")
 	if body.Length() > 0 {
 		return body
 	}
@@ -191,7 +232,6 @@ func appendUsefulLinks(md string, doc *goquery.Document, base string) string {
 	if len(links) == 0 {
 		return md
 	}
-	// Cap to keep agent mode economical (~50% savings target).
 	const maxLinks = 40
 	if len(links) > maxLinks {
 		links = links[:maxLinks]
@@ -208,9 +248,8 @@ func cleanupMarkdown(md string) string {
 	md = dataURIImage.ReplaceAllString(md, "")
 	md = dataURILink.ReplaceAllString(md, "")
 	md = emptyListNum.ReplaceAllString(md, "")
-	// Normalize link labels / protocol-relative URLs.
-	md = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`).ReplaceAllStringFunc(md, func(m string) string {
-		parts := regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`).FindStringSubmatch(m)
+	md = mdLink.ReplaceAllStringFunc(md, func(m string) string {
+		parts := mdLink.FindStringSubmatch(m)
 		if len(parts) != 3 {
 			return m
 		}

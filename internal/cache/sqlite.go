@@ -106,7 +106,15 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // Key builds a cache key (URL + representation params). Do not use canonical alone.
 func Key(url, mode, encoding string) string {
-	return fmt.Sprintf("%s|mode=%s|enc=%s", url, mode, encoding)
+	return KeyFull(url, mode, encoding, false, "off")
+}
+
+// KeyFull includes plain-text and JS-render representation knobs.
+func KeyFull(url, mode, encoding string, plain bool, renderJS string) string {
+	if renderJS == "" {
+		renderJS = "off"
+	}
+	return fmt.Sprintf("%s|mode=%s|enc=%s|plain=%t|js=%s", url, mode, encoding, plain, renderJS)
 }
 
 // Get returns a cached document if fresh.

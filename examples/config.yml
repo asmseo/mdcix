@@ -7,6 +7,13 @@ listen: ":8080"
 # agent  = artigo + links úteis (navegação para agentes)
 mode: reader
 
+# plain = true remove URLs do Markdown (opt-in; default mantém links navigacionais)
+# plain: false
+
+# render_js: off | auto | on  (headless Chrome; auto só se a extração estática vier vazia/fina)
+# render_js: off
+# render_timeout: 20s
+
 # Contagem estilo OpenAI cl100k
 encoding: cl100k_base
 

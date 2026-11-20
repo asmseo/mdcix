@@ -3,6 +3,7 @@ package ranking
 
 import (
 	"math"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -16,8 +17,14 @@ type Result struct {
 }
 
 // BM25 ranks document sections for a query (language-dependent lexical).
+//
+// Enhancements over plain BM25:
+//   - query synonym expansion for pricing / plan vocabulary (PT/EN/ES light)
+//   - heavier title/heading field boost
+//   - rare-term / numeric entity boost (years, prices, proper names in query)
+//   - soft coverage: sections that uniquely hold a rare query term get a floor score
 func BM25(doc document.Document, query string) []Result {
-	q := tokenize(query)
+	q := tokenize(expandQuery(query))
 	if len(q) == 0 {
 		out := make([]Result, 0, len(doc.Sections))
 		for _, s := range doc.Sections {
@@ -30,21 +37,32 @@ func BM25(doc document.Document, query string) []Result {
 	if N == 0 {
 		return nil
 	}
+
+	type fields struct {
+		title []string
+		body  []string
+		all   []string
+	}
+	docs := make([]fields, len(doc.Sections))
 	avgLen := 0.0
-	docsTok := make([][]string, len(doc.Sections))
 	for i, s := range doc.Sections {
-		// Boost title/heading text
-		text := s.Title + "\n" + s.Title + "\n" + s.Markdown
-		toks := tokenize(text)
-		docsTok[i] = toks
-		avgLen += float64(len(toks))
+		titleToks := tokenize(s.Title)
+		bodyToks := tokenize(s.Markdown)
+		all := make([]string, 0, len(titleToks)*3+len(bodyToks))
+		// title tripled into the bag for classic field boost
+		all = append(all, titleToks...)
+		all = append(all, titleToks...)
+		all = append(all, titleToks...)
+		all = append(all, bodyToks...)
+		docs[i] = fields{title: titleToks, body: bodyToks, all: all}
+		avgLen += float64(len(all))
 	}
 	avgLen /= N
 
 	df := map[string]float64{}
-	for _, toks := range docsTok {
+	for _, d := range docs {
 		seen := map[string]struct{}{}
-		for _, t := range toks {
+		for _, t := range d.all {
 			if _, ok := seen[t]; ok {
 				continue
 			}
@@ -53,16 +71,34 @@ func BM25(doc document.Document, query string) []Result {
 		}
 	}
 
+	// Sections that uniquely (or rarely) contain a query term — coverage floor.
+	termOwners := map[string][]int{}
+	for i, d := range docs {
+		seen := map[string]struct{}{}
+		for _, t := range d.all {
+			seen[t] = struct{}{}
+		}
+		for _, term := range unique(q) {
+			if _, ok := seen[term]; ok {
+				termOwners[term] = append(termOwners[term], i)
+			}
+		}
+	}
+
 	const k1 = 1.2
 	const b = 0.75
-	var results []Result
+	results := make([]Result, len(doc.Sections))
 	for i, s := range doc.Sections {
-		toks := docsTok[i]
+		d := docs[i]
 		tf := map[string]float64{}
-		for _, t := range toks {
+		for _, t := range d.all {
 			tf[t]++
 		}
-		dl := float64(len(toks))
+		titleSet := map[string]struct{}{}
+		for _, t := range d.title {
+			titleSet[t] = struct{}{}
+		}
+		dl := float64(len(d.all))
 		score := 0.0
 		for _, term := range q {
 			freq := tf[term]
@@ -72,24 +108,111 @@ func BM25(doc document.Document, query string) []Result {
 			n := df[term]
 			idf := math.Log(1 + (N-n+0.5)/(n+0.5))
 			denom := freq + k1*(1-b+b*dl/avgLen)
-			score += idf * (freq * (k1 + 1) / denom)
-			// exact title match boost
-			if strings.EqualFold(s.Title, term) || strings.Contains(strings.ToLower(s.Title), term) {
-				score *= 1.25
+			contrib := idf * (freq * (k1 + 1) / denom)
+			if _, ok := titleSet[term]; ok {
+				contrib *= 1.6
+			}
+			if isRareOrEntity(term, n, N) {
+				contrib *= 1.8
+			}
+			score += contrib
+		}
+		// Phrase / multi-term: if most query terms appear, small cohesion bonus.
+		if len(unique(q)) >= 2 {
+			hit := 0
+			for _, term := range unique(q) {
+				if tf[term] > 0 {
+					hit++
+				}
+			}
+			if hit == len(unique(q)) {
+				score *= 1.15
 			}
 		}
-		results = append(results, Result{Section: s, Score: score})
+		results[i] = Result{Section: s, Score: score}
 	}
-	// sort desc by score, stable by position
-	for i := 0; i < len(results); i++ {
-		for j := i + 1; j < len(results); j++ {
-			if results[j].Score > results[i].Score ||
-				(results[j].Score == results[i].Score && results[j].Section.Position < results[i].Section.Position) {
-				results[i], results[j] = results[j], results[i]
+
+	// Coverage floor: rare query terms must surface their owning sections.
+	for term, owners := range termOwners {
+		n := df[term]
+		if !isRareOrEntity(term, n, N) {
+			continue
+		}
+		if len(owners) == 0 || len(owners) > 3 {
+			continue
+		}
+		for _, i := range owners {
+			if results[i].Score < 0.5 {
+				results[i].Score = 0.5
+			} else {
+				results[i].Score *= 1.1
 			}
 		}
 	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Score == results[j].Score {
+			return results[i].Section.Position < results[j].Section.Position
+		}
+		return results[i].Score > results[j].Score
+	})
 	return results
+}
+
+func expandQuery(q string) string {
+	low := strings.ToLower(q)
+	extra := make([]string, 0, 8)
+	add := func(words ...string) {
+		for _, w := range words {
+			if !strings.Contains(low, w) {
+				extra = append(extra, w)
+			}
+		}
+	}
+	switch {
+	case strings.Contains(low, "preço") || strings.Contains(low, "precos") || strings.Contains(low, "preços") ||
+		strings.Contains(low, "price") || strings.Contains(low, "pricing") || strings.Contains(low, "cost") ||
+		strings.Contains(low, "mensal") || strings.Contains(low, "monthly") || strings.Contains(low, "plano") ||
+		strings.Contains(low, "plan") || strings.Contains(low, "assinatura") || strings.Contains(low, "subscription"):
+		add("price", "pricing", "plan", "plans", "monthly", "preço", "precos", "plano", "planos", "mensal")
+	}
+	if len(extra) == 0 {
+		return q
+	}
+	return q + " " + strings.Join(extra, " ")
+}
+
+func isRareOrEntity(term string, df, nDocs float64) bool {
+	if term == "" {
+		return false
+	}
+	// numeric / year / price-like
+	digits := 0
+	for _, r := range term {
+		if unicode.IsDigit(r) {
+			digits++
+		}
+	}
+	if digits > 0 && digits >= len(term)/2 {
+		return true
+	}
+	if len(term) >= 6 && df <= math.Max(1, nDocs*0.15) {
+		return true
+	}
+	return df <= 1
+}
+
+func unique(in []string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func tokenize(s string) []string {

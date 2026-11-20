@@ -166,6 +166,21 @@ OK: erro `bot_challenge` (não inventar economia de tokens).
 
 ---
 
+## 8b. Extração + plain + JS (pós-benchmark)
+
+```bash
+# Basecamp: main deve vencer article minúsculo
+./mdcix read https://basecamp.com/pricing 2>/dev/null | grep -E '\$29|\$79|\$99|\$199'
+
+# plain: sem URLs, labels preservadas
+./mdcix --plain read https://basecamp.com/pricing 2>/dev/null | grep -E 'https://' && echo FAIL || echo OK_no_urls
+
+# SPA (precisa Chrome local): HubSpot pricing
+./mdcix --render-js=auto read https://www.hubspot.com/pricing 2>/dev/null | grep -E '\$7|\$800'
+```
+
+OK: Basecamp com 4 preços; `--plain` sem `https://`; HubSpot com preços via `converted+js`.
+
 ## 9. MCP stdio
 
 ```bash

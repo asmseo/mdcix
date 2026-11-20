@@ -2,6 +2,8 @@
 
 - **BM25 é lexical**, não semântico multilíngue. Cross-language → preferir outline + `read_sections`.
 - **Sem embeddings / runtime de modelo** no motor (de propósito).
+- **JS rendering** (`--render-js=off|auto|on`) é opt-in e depende de Chrome/Chromium local; timeout duro evita hang. SPAs agressivas (bot wall / endless load) ainda podem falhar.
+- **`--plain`** remove links do Markdown (economia de tokens); default mantém links para a camada navigacional do agente.
 - **robots.txt** é aviso best-effort; **não** autoriza redistribuição pública.
 - **Content Signals / licenças de republicação** reservados; não há diretório público.
 - **Cache** é local e por processo/volume; sem cache compartilhado autenticado.

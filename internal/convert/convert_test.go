@@ -89,3 +89,40 @@ func TestCleanupDataURI(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+func TestExtractPrefersMainOverTinyArticle(t *testing.T) {
+	html := `<!DOCTYPE html><html><body>
+<article>Thousands of people are working right now.</article>
+<main>
+  <h1>Pricing</h1>
+  <p>Freelancer $29 /mo. Pro $79 /mo. Plus $99 /mo. Unlimited $199 /mo.</p>
+  <p>` + strings.Repeat("More product detail about packages and storage. ", 40) + `</p>
+</main>
+</body></html>`
+	res, err := HTMLToMarkdown(html, Options{Mode: ModeReader})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"$29", "$79", "$99", "$199"} {
+		if !strings.Contains(res.Markdown, want) {
+			t.Fatalf("missing %s in: %s", want, res.Markdown)
+		}
+	}
+}
+
+func TestPlainStripsLinks(t *testing.T) {
+	html := `<!DOCTYPE html><html><body><article>
+  <h1>Hello</h1>
+  <p>See <a href="https://example.com/docs">the docs</a> for details and more text here.</p>
+</article></body></html>`
+	res, err := HTMLToMarkdown(html, Options{Mode: ModeReader, Plain: true, BaseURL: "https://example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Markdown, "https://") || strings.Contains(res.Markdown, "](") {
+		t.Fatalf("plain should strip urls: %s", res.Markdown)
+	}
+	if !strings.Contains(res.Markdown, "the docs") {
+		t.Fatalf("should keep label: %s", res.Markdown)
+	}
+}

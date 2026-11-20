@@ -10,7 +10,8 @@ CLI / REST / MCP / proxy
    │ policy      │  robots aviso (local); sem bypass de paywall/CAPTCHA
    │ security    │  SSRF + classificação de falha
    │ fetch/HTTP  │  Accept markdown → HTML fallback
-   │ convert     │  extração reader|agent
+   │ render      │  Chrome headless opt-in (off|auto|on)
+   │ convert     │  extração reader|agent (+ plain opt-in)
    │ document    │  seções, versão, tokens
    │ cache       │  SQLite + ETag/TTL/evict
    │ context     │  BM25 + budget packer
@@ -33,6 +34,7 @@ Alinhados à proposta, adaptados ao repo existente (proxy/mitm/certs/convert pre
 
 - `internal/document` — modelo versionado + segmentação
 - `internal/context/{ranking,budget,tokenizer}` — seleção lexical
+- `internal/render` — headless Chrome (`--dump-dom`) com timeout duro
 - `internal/cache` — SQLite local
 - `internal/policy` — preferências de recuperação local
 - `internal/security` — SSRF + falhas

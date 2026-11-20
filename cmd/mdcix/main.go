@@ -23,6 +23,7 @@ import (
 	"github.com/asmseo/mdcix/internal/policy"
 	"github.com/asmseo/mdcix/internal/pro"
 	"github.com/asmseo/mdcix/internal/proxy"
+	"github.com/asmseo/mdcix/internal/render"
 	"github.com/asmseo/mdcix/internal/stats"
 	"github.com/asmseo/mdcix/internal/telemetry"
 	"github.com/asmseo/mdcix/internal/tokens"
@@ -60,6 +61,8 @@ Universal integration: HTTP_PROXY/HTTPS_PROXY → mdcix serve, or CLI/REST/MCP t
 	root.PersistentFlags().StringVar(&cfgPath, "config", "", "path to YAML config (optional)")
 	root.PersistentFlags().StringVar(&cfg.Listen, "listen", cfg.Listen, "proxy/API listen address")
 	root.PersistentFlags().StringVar(&cfg.Mode, "mode", cfg.Mode, "conversion mode: reader|agent")
+	root.PersistentFlags().BoolVar(&cfg.Plain, "plain", cfg.Plain, "strip markdown links/images to bare text (opt-in; default keeps navigational links)")
+	root.PersistentFlags().StringVar(&cfg.RenderJS, "render-js", cfg.RenderJS, "JS render: off|auto|on (headless Chrome; auto retries thin/SPA shells)")
 	root.PersistentFlags().StringVar(&cfg.Encoding, "encoding", cfg.Encoding, "tiktoken encoding")
 	root.PersistentFlags().BoolVar(&cfg.MITM, "mitm", cfg.MITM, "enable HTTPS MITM (requires trusting local CA)")
 	root.PersistentFlags().StringVar(&cfg.CertDir, "cert-dir", cfg.CertDir, "directory for MITM CA")
@@ -95,6 +98,9 @@ func newEngine(cfg *config.Config) (*gateway.Engine, error) {
 	eng := &gateway.Engine{
 		Counter:      ctr,
 		Mode:         convert.Mode(cfg.Mode),
+		Plain:        cfg.Plain,
+		RenderJS:     render.ParseMode(cfg.RenderJS),
+		RenderWait:   cfg.RenderTimeout,
 		UserAgent:    cfg.UserAgent,
 		Timeout:      cfg.Timeout,
 		MaxBody:      cfg.MaxBody,
@@ -265,6 +271,7 @@ func fetchCmd(cfg *config.Config, cfgPath *string) *cobra.Command {
 			}
 			res, err := fetch.Get(cmd.Context(), args[0], fetch.Options{
 				Mode:      convert.Mode(cfg.Mode),
+				Plain:     cfg.Plain,
 				UserAgent: cfg.UserAgent,
 				Timeout:   cfg.Timeout,
 				MaxBody:   cfg.MaxBody,
